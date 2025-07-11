@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useMemo, useCallback } from "react" // Added useCallback
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -20,12 +20,12 @@ import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import { SearchableSelect } from "@/components/global/searchable-select"
 import IPDSignaturePDF from "@/app/ipd/appointment/pdf"
-import { generateNextUHID } from "@/components/uhid-generator" // Import the UHID generator
+import { generateNextUHID } from "@/components/uhid-generator"
 
 // --- Type Definitions (Defined directly in this file) ---
 
 interface Option {
-  value: string;
+  value: string; // Changed to string as IDs are converted for select component
   label: string;
 }
 
@@ -91,7 +91,7 @@ interface IPDFormInput {
   admissionSource: string;
   admissionType: string;
   referralDoctor: string;
-  underCareOfDoctor: string;
+  underCareOfDoctor: string; // Changed to store doctor name (as string)
   depositAmount: string | number | null; // Use string for input, convert to number for DB
   paymentMode: string;
   bed: number | null; // Changed to number | null to match BedData.id and DB
@@ -171,13 +171,13 @@ const IPDAppointmentPage = () => {
     admissionSource: "ipd", // Default to IPD
     admissionType: "general", // Default to General
     referralDoctor: "",
-    underCareOfDoctor: "",
+    underCareOfDoctor: "", // Will store doctor name as string
     depositAmount: "",
     paymentMode: "cash", // Default to Cash
     roomType: "",
     bed: null, // Initialize as null to match type
     date: new Date().toISOString().split("T")[0],
-    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }), // Default to current time (24-hour)
   })
 
   useEffect(() => {
@@ -239,13 +239,13 @@ const IPDAppointmentPage = () => {
       console.error("Error fetching patient by UHID:", error);
       toast.error("Failed to fetch patient details by UHID.");
     }
-  }, []); // Empty dependency array means this function is created once
+  }, []);
 
   useEffect(() => {
     if (formData.uhid) {
       fetchPatientDetailsByUHID(formData.uhid);
     }
-  }, [formData.uhid, fetchPatientDetailsByUHID]); // Rerun when formData.uhid changes
+  }, [formData.uhid, fetchPatientDetailsByUHID]);
 
   const fetchPatients = async () => {
     try {
@@ -319,6 +319,42 @@ const IPDAppointmentPage = () => {
     setShowSuggestions(false)
   }
 
+  const sendWhatsAppNotification = async (phoneNumber: string, message: string) => {
+    // Basic validation to ensure phoneNumber is a string and not empty
+    if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
+      console.warn("Skipping WhatsApp notification: Phone number is missing or invalid.");
+      return;
+    }
+    const token = "99583991573"; // Your provided token
+
+    try {
+      const response = await fetch("https://wa.medblisss.com/send-text", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token: token,
+          number: `91${phoneNumber}`, // Prepend 91 for Indian numbers as per your API
+          message: message,
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        toast.success(`WhatsApp message sent to ${phoneNumber} successfully!`);
+        console.log(`WhatsApp message sent to ${phoneNumber}:`, data);
+      } else {
+        toast.error(`Failed to send WhatsApp message to ${phoneNumber}: ${data.message || 'Unknown error'}`);
+        console.error(`Failed to send WhatsApp message to ${phoneNumber}:`, data);
+      }
+    } catch (error) {
+      toast.error(`Error sending WhatsApp message to ${phoneNumber}.`);
+      console.error(`Error sending WhatsApp message to ${phoneNumber}:`, error);
+    }
+  };
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -361,15 +397,15 @@ const IPDAppointmentPage = () => {
         if (existingError && existingError.code !== 'PGRST116') throw existingError;
         existingPatient = existing;
       } else if (formData.name && formData.phone) {
-          // If no UHID, check by name and phone for potential existing patient
-          const { data: existing, error: existingError } = await supabase
-            .from("patient_detail")
-            .select("*")
-            .eq("name", formData.name)
-            .eq("number", Number(formData.phone))
-            .single();
-          if (existingError && existingError.code !== 'PGRST116') throw existingError;
-          existingPatient = existing;
+        // If no UHID, check by name and phone for potential existing patient
+        const { data: existing, error: existingError } = await supabase
+          .from("patient_detail")
+          .select("*")
+          .eq("name", formData.name)
+          .eq("number", Number(formData.phone))
+          .single();
+        if (existingError && existingError.code !== 'PGRST116') throw existingError;
+        existingPatient = existing;
       }
 
 
@@ -438,8 +474,11 @@ const IPDAppointmentPage = () => {
       // Bed ID is already a number from formData.bed due to type change
       const selectedBedIdForDb = formData.bed;
       if (selectedBedIdForDb === null) {
-          throw new Error("Invalid bed selection. This should not happen due to validation.");
+        throw new Error("Invalid bed selection. This should not happen due to validation.");
       }
+
+      // Get the doctor's name to store, not the ID
+      const doctorNameForDB = getDoctorNameById(formData.underCareOfDoctor);
 
       // Insert new IPD registration
       const { data: ipdData, error: ipdError } = await supabase
@@ -448,7 +487,7 @@ const IPDAppointmentPage = () => {
           uhid: patientUhid, // Link using UHID
           admission_source: formData.admissionSource,
           admission_type: formData.admissionType,
-          under_care_of_doctor: formData.underCareOfDoctor,
+          under_care_of_doctor: doctorNameForDB, // Storing doctor's name
           payment_detail: paymentDetail,
           bed_id: selectedBedIdForDb, // This is now correctly a number
           service_detail: serviceDetail, // Empty by default
@@ -470,6 +509,63 @@ const IPDAppointmentPage = () => {
         .eq("id", selectedBedIdForDb) // This is now correctly a number
 
       if (bedError) throw bedError
+
+      // --- WhatsApp Notification Logic ---
+      const selectedBed = beds.find(bed => bed.id === selectedBedIdForDb);
+
+      // Patient message
+      if (formData.phone) {
+        const patientMessage = `
+🏥 *IPD Admission Confirmation - MedBliss Hospital*
+
+Dear *${formData.name}*,
+
+Your IPD admission has been successfully registered.
+
+*Details:*
+•   *UHID:* ${patientUhid}
+•   *Admission Date:* ${formData.date}
+•   *Admission Time:* ${formData.time}
+•   *Room Type:* ${roomTypeOptions.find(opt => opt.value === formData.roomType)?.label || 'N/A'}
+•   *Bed Number:* ${selectedBed?.bed_number || 'N/A'} (${selectedBed?.bed_type || 'N/A'})
+•   *Under Care Of:* Dr. ${doctorNameForDB}
+
+We wish you a speedy recovery!
+
+For any assistance, please contact us.
+MedBliss Hospital
+`;
+        await sendWhatsAppNotification(String(formData.phone), patientMessage); // Ensure phone is string
+      }
+
+      // Relative message
+      if (formData.relativeName && formData.relativePhone) {
+        const relativeMessage = `
+🏥 *IPD Admission Update - MedBliss Hospital*
+
+Dear ${formData.relativeName},
+
+This message is to confirm the IPD admission of *${formData.name}*.
+
+*Patient Details:*
+•   *Name:* ${formData.name}
+•   *UHID:* ${patientUhid}
+
+*Admission Details:*
+•   *Date:* ${formData.date}
+•   *Time:* ${formData.time}
+•   *Room Type:* ${roomTypeOptions.find(opt => opt.value === formData.roomType)?.label || 'N/A'}
+•   *Bed Number:* ${selectedBed?.bed_number || 'N/A'} (${selectedBed?.bed_type || 'N/A'})
+•   *Under Care Of:* Dr. ${doctorNameForDB}
+
+We will keep you updated on their progress.
+
+For any queries, please feel free to reach out.
+MedBliss Hospital
+`;
+        await sendWhatsAppNotification(String(formData.relativePhone), relativeMessage); // Ensure relativePhone is string
+      }
+      // --- End WhatsApp Notification Logic ---
 
       resetForm()
       fetchBeds() // Refresh bed data
@@ -496,13 +592,13 @@ const IPDAppointmentPage = () => {
       admissionSource: "ipd",
       admissionType: "general",
       referralDoctor: "",
-      underCareOfDoctor: "",
+      underCareOfDoctor: "", // Reset to empty string for name
       depositAmount: "",
       paymentMode: "cash",
       roomType: "",
       bed: null,
       date: new Date().toISOString().split("T")[0],
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }), // Reset to current time
     })
   }
 
@@ -550,31 +646,13 @@ const IPDAppointmentPage = () => {
 
   const groupedBeds = groupBedsByRoomType()
 
+  // FIX: Use doctor.dr_name as the value and label
   const filteredDoctorOptions = useMemo(() => {
-    const currentAdmissionSource = formData.admissionSource
-    if (!currentAdmissionSource) {
-      return allDoctors.map((doctor) => ({
-        value: doctor.dr_name,
-        label: doctor.dr_name,
-      }))
-    }
-
-    return allDoctors
-      .filter((doctor) => {
-        if (currentAdmissionSource === "opd") {
-          return doctor.department === "opd" || doctor.department === "both"
-        }
-        if (currentAdmissionSource === "ipd") {
-          return doctor.department === "ipd" || doctor.department === "both"
-        }
-        // For 'casualty' or 'referral', show all doctors
-        return true
-      })
-      .map((doctor) => ({
-        value: doctor.dr_name,
-        label: doctor.dr_name,
-      }))
-  }, [formData.admissionSource, allDoctors])
+    return allDoctors.map((doctor) => ({
+      value: doctor.dr_name, // Use doctor.dr_name as the value
+      label: doctor.dr_name,    // Use doctor.dr_name for display
+    }));
+  }, [allDoctors]);
 
   const bedSelectOptions = useMemo(() => {
     const options = availableBeds.map((bed) => ({
@@ -594,6 +672,18 @@ const IPDAppointmentPage = () => {
     }
     return options
   }, [availableBeds, formData.bed, beds])
+
+  // Helper to get doctor name by ID for display in preview and PDF
+  const getDoctorNameById = useCallback((doctorId: string | number | null) => {
+    // If underCareOfDoctor already contains the name (as per new logic), return it directly
+    if (typeof doctorId === 'string' && allDoctors.some(doc => doc.dr_name === doctorId)) {
+      return doctorId;
+    }
+    // Otherwise, if it's an ID (from old state or if select returns ID), find the name
+    const doctor = allDoctors.find(doc => String(doc.id) === String(doctorId));
+    return doctor ? doctor.dr_name : "N/A";
+  }, [allDoctors]);
+
 
   return (
     <Layout>
@@ -760,6 +850,7 @@ const IPDAppointmentPage = () => {
                     placeholder="Enter relative address"
                     value={formData.relativeAddress || ''} // Handle null for UI
                     onChange={(e) => setFormData((prev: IPDFormInput) => ({ ...prev, relativeAddress: e.target.value }))}
+                    autoComplete="off"
                     className="placeholder-gray-400"
                   />
                 </div>
@@ -783,7 +874,7 @@ const IPDAppointmentPage = () => {
                     options={admissionSourceOptions}
                     value={formData.admissionSource}
                     onValueChange={(value) =>
-                      setFormData((prev: IPDFormInput) => ({ ...prev, admissionSource: value, underCareOfDoctor: "" }))
+                      setFormData((prev: IPDFormInput) => ({ ...prev, admissionSource: value, referralDoctor: "" })) // Clear referral doctor if not 'referral'
                     }
                     placeholder="Select admission source"
                   />
@@ -816,7 +907,7 @@ const IPDAppointmentPage = () => {
                   <Label>Under Care of Doctor</Label>
                   <SearchableSelect
                     options={filteredDoctorOptions}
-                    value={formData.underCareOfDoctor}
+                    value={formData.underCareOfDoctor} // This now stores the doctor's name
                     onValueChange={(value) => setFormData((prev: IPDFormInput) => ({ ...prev, underCareOfDoctor: value }))}
                     placeholder="Select doctor"
                   />
@@ -1100,23 +1191,23 @@ const IPDAppointmentPage = () => {
                   </div>
                   <div className="bg-white p-3 rounded-md shadow-sm">
                     <span className="font-medium text-gray-500">Doctor:</span>
-                    <p className="font-semibold mt-1">{formData.underCareOfDoctor}</p>
+                    <p className="font-semibold mt-1">{formData.underCareOfDoctor}</p> {/* Displaying doctor name directly */}
                   </div>
                   {/* Display deposit amount only if greater than 0 */}
                   {Number(formData.depositAmount) > 0 && (
-                  <div className="bg-white p-3 rounded-md shadow-sm">
-                    <span className="font-medium text-gray-500">Deposit:</span>
-                    <p className="font-semibold mt-1">₹{formData.depositAmount}</p>
-                  </div>
+                    <div className="bg-white p-3 rounded-md shadow-sm">
+                      <span className="font-medium text-gray-500">Deposit:</span>
+                      <p className="font-semibold mt-1">₹{formData.depositAmount}</p>
+                    </div>
                   )}
                   {/* Display payment mode only if deposit amount is greater than 0 */}
                   {Number(formData.depositAmount) > 0 && (
-                  <div className="bg-white p-3 rounded-md shadow-sm">
-                    <span className="font-medium text-gray-500">Payment:</span>
-                    <p className="font-semibold mt-1">
-                      {paymentModeOptions.find((p) => p.value === formData.paymentMode)?.label}
-                    </p>
-                  </div>
+                    <div className="bg-white p-3 rounded-md shadow-sm">
+                      <span className="font-medium text-gray-500">Payment:</span>
+                      <p className="font-semibold mt-1">
+                        {paymentModeOptions.find((p) => p.value === formData.paymentMode)?.label}
+                      </p>
+                    </div>
                   )}
                   <div className="bg-white p-3 rounded-md shadow-sm">
                     <span className="font-medium text-gray-500">Date:</span>
@@ -1161,7 +1252,7 @@ const IPDAppointmentPage = () => {
                   admissionSource: formData.admissionSource,
                   admissionType: formData.admissionType,
                   referralDoctor: formData.referralDoctor,
-                  underCareOfDoctor: formData.underCareOfDoctor,
+                  underCareOfDoctor: formData.underCareOfDoctor, // Pass name for PDF
                   depositAmount: formData.depositAmount,
                   paymentMode: formData.paymentMode,
                   bed: formData.bed !== null ? formData.bed : 0, // Ensure number for PDF, handle null case if possible (0 might not be valid bed)

@@ -1,4 +1,5 @@
 "use client"
+
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useForm, Controller, FormProvider, useFieldArray } from "react-hook-form"
 import { ToastContainer, toast } from "react-toastify"
@@ -62,7 +63,7 @@ import {
   Casualty,
   CardiologyStudyOptions,
   type ServiceOption,
-} from "@/app/opd/types"
+} from "@/app/opd/types" // IMPORTANT: Ensure your ModalitySelection, Doctor types are updated here.
 
 // Ensure correct path to your action functions
 import {
@@ -76,6 +77,7 @@ import {
 import { openBillInNewTabProgrammatically } from "./bill-generator"
 import Layout from "@/components/global/Layout"
 
+// Helper functions (kept at top-level scope)
 function formatAMPM(date: Date): string {
   const h = date.getHours()
   const m = date.getMinutes()
@@ -168,7 +170,7 @@ const AppointmentPage = () => {
   } = form
 
   /* --------------------------------------------------------------------- */
-  /* COMBINE RHF REF + LOCAL REF                                         */
+  /* COMBINE RHF REF + LOCAL REF                                           */
   /* --------------------------------------------------------------------- */
   const nameField = register("name", { required: "Name is required" })
   const phoneField = register("phone", {
@@ -350,7 +352,7 @@ const AppointmentPage = () => {
   const calculateTotalAmountPaid = () => (Number(watch("cashAmount")) || 0) + (Number(watch("onlineAmount")) || 0)
 
   const addModality = (type: ModalitySelection["type"]) =>
-    append({ id: Math.random().toString(36).substr(2, 9), type, charges: 0, doctor: "" })
+    append({ id: Math.random().toString(36).substr(2, 9), type, charges: 0, doctor: "", service: "" }) // Added service: "" default
 
   const removeModality = (index: number) => {
     remove(index)
@@ -453,17 +455,93 @@ const AppointmentPage = () => {
     }
   }
 
+  const sendWhatsAppConfirmation = async (
+    patientName: string,
+    phoneNumber: string,
+    uhid: string | null,
+    billNo: number | null,
+    appointmentType: "visithospital" | "oncall",
+    modalities: ModalitySelection[], // Now contains doctor name
+    totalCharges: number,
+    discount: number
+  ) => {
+    const apiUrl = "https://wa.medblisss.com/send-text"
+    const token = "99583991573" // Your API token
+    const formattedPhoneNumber = `91${phoneNumber}` // Assuming Indian numbers and API expects 91 prefix
+
+    let message = `*Dear ${patientName},*\n\n`
+
+    if (appointmentType === "visithospital") {
+      message += `Your *OPD appointment* has been successfully booked at MedBliss Hospital.\n\n`
+      if (uhid) message += `*UHID:* ${uhid}\n`
+      if (billNo) message += `*Bill No:* ${billNo}\n\n`
+
+      if (modalities && modalities.length > 0) {
+        message += `*Services Booked:*\n`
+        modalities.forEach((modality, index) => {
+          // modality.doctor is already the name here because of `onValueChange` logic
+          const doctorName = modality.doctor || "N/A"
+          const serviceName = modality.service || modality.type; // Use custom service name if available, otherwise modality type
+          message += `  ${index + 1}. *${serviceName}* (Dr. ${doctorName}) - ₹${modality.charges}\n`
+        })
+        message += `\n*Total Charges:* ₹${totalCharges}\n`
+        if (discount > 0) {
+          message += `*Discount Applied:* ₹${discount}\n`
+          message += `*Amount Payable:* ₹${totalCharges - discount}\n`
+        } else {
+          message += `*Amount Payable:* ₹${totalCharges}\n`
+        }
+      }
+      message += `\nWe look forward to your visit!`
+    } else {
+      message += `Your *On-Call appointment* has been successfully registered.\n`
+      if (uhid) message += `*UHID:* ${uhid}\n`
+      message += `\nOur team will contact you shortly.`
+    }
+    message += `\n\n*Thank you for choosing MedBliss Hospital.*`
+
+    try {
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token: token,
+          number: formattedPhoneNumber,
+          message: message,
+        }),
+      })
+
+      const data = await response.json()
+      if (data.status === "success") {
+        toast.success("WhatsApp confirmation sent!")
+      } else {
+        console.error("WhatsApp API Error:", data.message)
+        toast.warn(`Failed to send WhatsApp confirmation: ${data.message}`)
+      }
+    } catch (error) {
+      console.error("Error sending WhatsApp message:", error)
+      toast.warn("Could not send WhatsApp confirmation due to a network error.")
+    }
+  }
+
   const onSubmit = async (d: IFormInput) => {
     setIsLoading(true)
     try {
       if (!d.opdType) d.opdType = d.appointmentType === "visithospital" ? "OPD" : "On-Call"
       if (d.appointmentType === "visithospital" && !d.modalities.length) return toast.error("Add at least one service.")
-      if (d.appointmentType === "visithospital" && d.modalities.some((m) => !m.doctor || !String(m.doctor).trim()))
-        return toast.error("Doctor required on every service.")
-
+      // Ensure doctor field for each modality is filled if it's a doctor-dependent type
+      if (d.appointmentType === "visithospital" && 
+          d.modalities.some((m) => 
+            (m.type === "consultation" || m.type === "casualty" || m.type === "custom") && 
+            (!m.doctor || !String(m.doctor).trim()))) {
+          return toast.error("Doctor required for consultation, casualty, and custom services.");
+      }
+      
       const res = await createAppointment(
         d,
-        watchedModalities,
+        watchedModalities, // Pass modalities which now contain doctor name
         totalModalityCharges,
         calculateTotalAmountPaid(),
         selectedPatient?.patient_id || null,
@@ -477,6 +555,20 @@ const AppointmentPage = () => {
       setLastBillNo(res.billNo || null)
       setIsSubmitted(true)
       fetchInitialData() // Refresh on-call list after submission
+
+      // Send WhatsApp confirmation with detailed information
+      if (d.phone && d.name) {
+        await sendWhatsAppConfirmation(
+          d.name,
+          d.phone,
+          res.uhid || null,
+          res.billNo || null,
+          d.appointmentType,
+          watchedModalities, // Pass modalities
+          totalModalityCharges, // Pass total charges
+          watchedDiscount || 0 // Pass discount with default value if undefined
+        )
+      }
 
       if (d.appointmentType === "visithospital" && res.uhid)
         await openBillInNewTabProgrammatically(
@@ -1017,7 +1109,20 @@ const AppointmentPage = () => {
                                       </Label>
                                       <Select
                                         value={modality.doctor || ""}
-                                        onValueChange={(value) => updateModalityField(index, "doctor", value)} // Use modified handler
+                                        onValueChange={(doctorId: string) => {
+                                          const selectedDoctor = doctors.find((d) => d.id === doctorId);
+                                          // Store doctor's name, not ID
+                                          updateModalityField(index, "doctor", selectedDoctor?.dr_name || "");
+                                          // Automatically set specialist if available
+                                          if (selectedDoctor?.specialist) {
+                                            updateModalityField(index, "specialist", selectedDoctor.specialist);
+                                          }
+                                          // Automatically set charges for consultation if doctor has default charges
+                                          if (modality.type === "consultation" && selectedDoctor?.opd_charge) {
+                                            updateModalityField(index, "charges", selectedDoctor.opd_charge);
+                                            updateModalityField(index, "visitType", "first"); // Default to first visit
+                                          }
+                                        }}
                                       >
                                         <SelectTrigger
                                           className={`h-9 text-sm ${
@@ -1028,7 +1133,7 @@ const AppointmentPage = () => {
                                         </SelectTrigger>
                                         <SelectContent>
                                           {doctors.map((doctor) => (
-                                            <SelectItem key={doctor.id} value={doctor.id}>
+                                            <SelectItem key={doctor.id} value={doctor.id}> {/* Use doctor.id for value */}
                                               {doctor.dr_name}
                                             </SelectItem>
                                           ))}
@@ -1046,7 +1151,7 @@ const AppointmentPage = () => {
                                           <Label className="text-xs">Specialist</Label>
                                           <Select
                                             value={modality.specialist || ""}
-                                            onValueChange={(value) => updateModalityField(index, "specialist", value)} // Use modified handler
+                                            onValueChange={(value) => updateModalityField(index, "specialist", value)}
                                           >
                                             <SelectTrigger className="h-9 text-sm">
                                               <SelectValue placeholder="Select specialist" />
@@ -1070,7 +1175,7 @@ const AppointmentPage = () => {
                                           <Select
                                             value={modality.visitType || ""}
                                             onValueChange={(value) => {
-                                              const doctor = doctors.find((d) => d.id === modality.doctor)
+                                              const doctor = doctors.find((d) => d.dr_name === modality.doctor) // Find by name
                                               let charges = 0
                                               if (doctor?.charges?.[0]) {
                                                 const chargeData = doctor.charges[0]
@@ -1083,8 +1188,8 @@ const AppointmentPage = () => {
                                                   charges = chargeData.followUpCharge
                                                 }
                                               }
-                                              updateModalityField(index, "visitType", value as "first" | "followup") // Use modified handler
-                                              updateModalityField(index, "charges", charges) // Update charges too
+                                              updateModalityField(index, "visitType", value as "first" | "followup")
+                                              updateModalityField(index, "charges", charges)
                                             }}
                                           >
                                             <SelectTrigger className="h-9 text-sm">
@@ -1129,8 +1234,8 @@ const AppointmentPage = () => {
                                           onValueChange={(value) => {
                                             const serviceOptions = getServiceOptions(modality.type)
                                             const selectedService = serviceOptions.find((s) => s.service === value)
-                                            updateModalityField(index, "service", value) // Use modified handler
-                                            updateModalityField(index, "charges", selectedService?.amount || 0) // Update charges too
+                                            updateModalityField(index, "service", value)
+                                            updateModalityField(index, "charges", selectedService?.amount || 0)
                                           }}
                                         >
                                           <SelectTrigger className="h-9 text-sm">

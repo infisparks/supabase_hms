@@ -1,3 +1,4 @@
+// app/ipd/discharge/[ipdId]/page.tsx
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
@@ -17,10 +18,11 @@ import {
   CheckCircle,
   Clock,
   RefreshCw, // Added for loading spinner
+  XCircle, // For modal close
 } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import { format, parseISO } from "date-fns";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion"; // Import AnimatePresence for modal animations
 import "react-toastify/dist/ReactToastify.css";
 
 // Interface for discharge summary data stored in Supabase
@@ -42,6 +44,7 @@ interface DischargeSummarySupabase {
   follow_up: string | null;
   discharge_instructions: string | null;
   last_updated: string | null;
+  discharge_type?: string | null; // Added new field for discharge type
 }
 
 // Interface for the form state (camelCase for React usage)
@@ -78,7 +81,15 @@ interface PatientRecord {
   bedId?: number | null; // The actual bed_id to update bed status
   admitDate?: string | null; // From ipd_registration.admission_date or created_at
   dischargeDate?: string | null; // From ipd_registration.discharge_date
+  currentDischargeType?: string | null; // To store if patient was already discharged with a type
 }
+
+// Define discharge types
+const DISCHARGE_TYPES = {
+  DISCHARGE: "Discharge",
+  DISCHARGE_PARTIALLY: "Discharge Partially",
+  DEATH: "Death",
+};
 
 export default function DischargeSummaryPage() {
   const { ipdId } = useParams() as { ipdId: string }; // Only need ipdId for this page
@@ -106,6 +117,7 @@ export default function DischargeSummaryPage() {
   /* UI loading/saving flags */
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true); // Set to true initially for data fetch
+  const [showDischargeModal, setShowDischargeModal] = useState(false); // State for modal visibility
 
   /* Info about when the summary was last saved */
   const [lastSaved, setLastSaved] = useState<string | null>(null);
@@ -175,27 +187,7 @@ export default function DischargeSummaryPage() {
         return;
       }
 
-      const patient: PatientRecord = {
-        patientId: patientDetail.patient_id,
-        uhid: ipdData.uhid,
-        ipdId: String(ipdData.ipd_id), // Ensure it's string for useParams consistency
-        name: patientDetail.name,
-        mobileNumber: String(patientDetail.number || ""),
-        address: patientDetail.address,
-        age: patientDetail.age,
-        gender: patientDetail.gender,
-        relativeName: ipdData.relative_name,
-        relativePhone: ipdData.relative_ph_no,
-        relativeAddress: ipdData.relative_address,
-        roomType: bedManagement?.room_type || null,
-        bedNumber: bedManagement?.bed_number || null,
-        bedId: ipdData.bed_id, // Keep bed_id to update its status later
-        admitDate: ipdData.admission_date || ipdData.created_at,
-        dischargeDate: ipdData.discharge_date,
-      };
-      setPatientRecord(patient);
-
-      // Fetch existing discharge summary if available
+      // Fetch existing discharge summary to get discharge_type if already set
       const { data: summaryData, error: summaryError } = await supabase
         .from("discharge_summaries")
         .select("*")
@@ -223,6 +215,28 @@ export default function DischargeSummaryPage() {
         });
         setLastSaved(summaryData.last_updated);
       }
+
+      const patient: PatientRecord = {
+        patientId: patientDetail.patient_id,
+        uhid: ipdData.uhid,
+        ipdId: String(ipdData.ipd_id), // Ensure it's string for useParams consistency
+        name: patientDetail.name,
+        mobileNumber: String(patientDetail.number || ""),
+        address: patientDetail.address,
+        age: patientDetail.age,
+        gender: patientDetail.gender,
+        relativeName: ipdData.relative_name,
+        relativePhone: ipdData.relative_ph_no,
+        relativeAddress: ipdData.relative_address,
+        roomType: bedManagement?.room_type || null,
+        bedNumber: bedManagement?.bed_number || null,
+        bedId: ipdData.bed_id, // Keep bed_id to update its status later
+        admitDate: ipdData.admission_date || ipdData.created_at,
+        dischargeDate: ipdData.discharge_date,
+        currentDischargeType: summaryData?.discharge_type || null, // Set discharge type from summary
+      };
+      setPatientRecord(patient);
+
     } catch (err) {
       console.error("Caught error in fetchPatientAndIpdData:", err);
       toast.error("An unexpected error occurred while loading patient data.");
@@ -313,6 +327,8 @@ export default function DischargeSummaryPage() {
         follow_up: dischargeData.followUp || null,
         discharge_instructions: dischargeData.dischargeInstructions || null,
         last_updated: now,
+        // When saving draft, don't change discharge_type unless it's already set
+        discharge_type: patientRecord.currentDischargeType || null,
       };
 
       // Check if a summary already exists for this ipd_id
@@ -352,27 +368,46 @@ export default function DischargeSummaryPage() {
   };
 
   /* ─── "Complete Discharge" → update discharge_date in ipd_registration, free bed, and save summary ─ */
-  const finalDischarge = async () => {
+  const finalDischarge = async (dischargeType: string) => {
     if (!patientRecord) {
       toast.error("Patient record not loaded. Cannot discharge.");
       return;
     }
-    if (!patientRecord.roomType || !patientRecord.bedNumber || !patientRecord.bedId) {
-      toast.error("Missing bed/ward information. Please ensure patient is assigned a bed.");
+
+    // Only require bed info if it's a full discharge or death
+    if (
+      (dischargeType === DISCHARGE_TYPES.DISCHARGE || dischargeType === DISCHARGE_TYPES.DEATH) &&
+      (!patientRecord.roomType || !patientRecord.bedNumber || !patientRecord.bedId)
+    ) {
+      toast.error("Missing bed/ward information for final discharge. Please ensure patient is assigned a bed.");
       return;
     }
+
     setLoading(true); // Use loading for the final discharge process
+    setShowDischargeModal(false); // Close the modal
     try {
       const now = new Date().toISOString();
-      
-      // 1. Update discharge_date in ipd_registration
-      const { error: ipdUpdateError } = await supabase
-        .from("ipd_registration")
-        .update({ discharge_date: now })
-        .eq("ipd_id", parseInt(patientRecord.ipdId)); // Ensure ipdId is number for DB
-      if (ipdUpdateError) throw ipdUpdateError;
 
-      // 2. Save the discharge summary text (same logic as saveDraft, but ensure it's saved)
+      // 1. Update discharge_date in ipd_registration
+      // If it's a final discharge or death, set the current time.
+      // If it's a partial discharge, ensure discharge_date is NULL.
+      if (dischargeType === DISCHARGE_TYPES.DISCHARGE || dischargeType === DISCHARGE_TYPES.DEATH) {
+        const { error: ipdUpdateError } = await supabase
+          .from("ipd_registration")
+          .update({ discharge_date: now }) // Set discharge date to current time for final discharge/death
+          .eq("ipd_id", parseInt(patientRecord.ipdId));
+        if (ipdUpdateError) throw ipdUpdateError;
+      } else if (dischargeType === DISCHARGE_TYPES.DISCHARGE_PARTIALLY) {
+        // For partial discharge, the ipd_registration.discharge_date should remain null.
+        // We explicitly set it to null here to ensure consistency, in case it was accidentally set.
+        const { error: ipdUpdateError } = await supabase
+          .from("ipd_registration")
+          .update({ discharge_date: null }) // Explicitly set to null for partial discharge
+          .eq("ipd_id", parseInt(patientRecord.ipdId));
+        if (ipdUpdateError) throw ipdUpdateError;
+      }
+
+      // 2. Save the discharge summary text and discharge type
       const payload: DischargeSummarySupabase = {
         ipd_id: parseInt(patientRecord.ipdId),
         patient_id: patientRecord.patientId,
@@ -390,12 +425,13 @@ export default function DischargeSummaryPage() {
         follow_up: dischargeData.followUp || null,
         discharge_instructions: dischargeData.dischargeInstructions || null,
         last_updated: now,
+        discharge_type: dischargeType, // Set the selected discharge type
       };
 
       const { data: existingSummary, error: fetchError } = await supabase
         .from("discharge_summaries")
         .select("id")
-        .eq("ipd_id", parseInt(patientRecord.ipdId)) // Ensure ipdId is number for DB
+        .eq("ipd_id", parseInt(patientRecord.ipdId))
         .single();
 
       if (fetchError && fetchError.code !== 'PGRST116') {
@@ -415,23 +451,83 @@ export default function DischargeSummaryPage() {
         if (insertError) throw insertError;
       }
 
-      // 3. Free up the bed in bed_management
-      const { error: bedUpdateError } = await supabase
-        .from("bed_management")
-        .update({ status: "Available" })
-        .eq("id", patientRecord.bedId);
-      if (bedUpdateError) throw bedUpdateError;
-      
-      toast.success("Patient discharged successfully!");
-      // Redirect to billing or a confirmation page
-      router.push(`/ipd/billing/${patientRecord.ipdId}`); // Adjust this route as needed
+      // 3. Update bed status in bed_management
+      if (patientRecord.bedId) {
+        let newBedStatus: "available" | "occupied" | null = null;
+        if (dischargeType === DISCHARGE_TYPES.DISCHARGE || dischargeType === DISCHARGE_TYPES.DEATH) {
+          newBedStatus = "available"; // Free the bed for final discharge or death
+        } else if (dischargeType === DISCHARGE_TYPES.DISCHARGE_PARTIALLY) {
+          newBedStatus = "occupied"; // Keep bed occupied for partial discharge
+        }
+
+        if (newBedStatus) {
+          const { error: bedUpdateError } = await supabase
+            .from("bed_management")
+            .update({ status: newBedStatus }) // Set bed status as determined
+            .eq("id", patientRecord.bedId);
+          if (bedUpdateError) throw bedUpdateError;
+        } else {
+          console.warn(`No specific bed status update defined for dischargeType: ${dischargeType}`);
+        }
+      } else {
+        console.warn("Patient has no bed_id, cannot update bed status.");
+      }
+
+      toast.success(`Patient marked as ${dischargeType.toLowerCase()} successfully!`);
+
+      // Update local state to reflect the changes
+      setPatientRecord((prev) => ({
+        ...prev!,
+        // Only update dischargeDate in local state if it's a final discharge type.
+        // Otherwise, explicitly set it to null for partially discharged to reflect DB.
+        dischargeDate: (dischargeType === DISCHARGE_TYPES.DISCHARGE || dischargeType === DISCHARGE_TYPES.DEATH)
+          ? now
+          : null,
+        currentDischargeType: dischargeType,
+      }));
+
+      // Redirect based on discharge type
+      if (dischargeType === DISCHARGE_TYPES.DISCHARGE) {
+        router.push(`/ipd/billing/${patientRecord.ipdId}`); // Redirect to billing for final discharge
+      } else {
+        // For partial discharge or death, navigate back to the IPD management list
+        router.push(`/ipd/management`);
+      }
+
     } catch (err: any) {
-      console.error("Error during final discharge:", err);
+      console.error("Error during discharge process:", err);
       toast.error("Error during discharge: " + err.message);
     } finally {
       setLoading(false);
     }
   };
+
+  /* ─── Helper to render a single field with (Ctrl+B) hint ───────────────────── */
+  const Field = (
+    key: keyof DischargeDataForm,
+    label: string,
+    rows = 4,
+    placeholder = "Type here…"
+  ) => (
+    <div className="space-y-2">
+      <label htmlFor={key} className="block text-sm font-medium text-gray-700">
+        {label}
+        <span className="text-xs text-gray-500 ml-2">(Ctrl+B for bold)</span>
+      </label>
+      <textarea
+        id={key} // Added ID for accessibility and htmlFor
+        ref={(el) => {
+          textRefs.current[key as string] = el;
+        }}
+        rows={rows}
+        value={dischargeData[key] || ""} // Use dischargeData state
+        placeholder={placeholder}
+        onKeyDown={(e) => handleKey(e, key)}
+        onChange={(e) => handleChange(key, e.target.value)}
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent resize-y min-h-[50px] shadow-sm"
+      />
+    </div>
+  );
 
   /* ─── Render Loading State ───────────────────────────────── */
   if (loading && !patientRecord) { // Only show full-page loader if no record is loaded yet
@@ -464,32 +560,10 @@ export default function DischargeSummaryPage() {
     );
   }
 
-  /* ─── Helper to render a single field with (Ctrl+B) hint ───────────────────── */
-  const Field = (
-    key: keyof DischargeDataForm,
-    label: string,
-    rows = 4,
-    placeholder = "Type here…"
-  ) => (
-    <div className="space-y-2">
-      <label htmlFor={key} className="block text-sm font-medium text-gray-700">
-        {label}
-        <span className="text-xs text-gray-500 ml-2">(Ctrl+B for bold)</span>
-      </label>
-      <textarea
-        id={key} // Added ID for accessibility and htmlFor
-        ref={(el) => {
-          textRefs.current[key as string] = el;
-        }}
-        rows={rows}
-        value={dischargeData[key] || ""} // Use dischargeData state
-        placeholder={placeholder}
-        onKeyDown={(e) => handleKey(e, key)}
-        onChange={(e) => handleChange(key, e.target.value)}
-        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent resize-y min-h-[50px] shadow-sm"
-      />
-    </div>
-  );
+  // Determine if the "Discharge Patient" button should be enabled.
+  // It should be enabled if the patient is NOT fully discharged (i.e., dischargeDate is null)
+  // OR if they are currently "Discharge Partially" (allowing them to finalize discharge).
+  const canInitiateDischarge = !patientRecord.dischargeDate || patientRecord.currentDischargeType === DISCHARGE_TYPES.DISCHARGE_PARTIALLY;
 
   /* ─── Full JSX ───────────────────────────────────────────────────────────────────────── */
   return (
@@ -511,14 +585,14 @@ export default function DischargeSummaryPage() {
               <div className="flex items-center text-sm text-gray-500">
                 <Clock size={14} className="mr-1" />
                 Last saved:{" "}
-                {format(parseISO(lastSaved), "MMM dd, yyyy 'at' HH:mm")}
+                {format(parseISO(lastSaved), "MMM dd,yyyy 'at' HH:mm")}
               </div>
             )}
 
             <button
               className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={saveDraft}
-              disabled={saving || loading} // Disable if overall loading or saving is in progress
+              disabled={Boolean(saving || loading)} // Using Boolean() for explicit boolean conversion
             >
               {saving ? (
                 <span className="animate-spin border-2 border-white border-t-transparent h-4 w-4 rounded-full mr-2" />
@@ -528,27 +602,26 @@ export default function DischargeSummaryPage() {
               {saving ? "Saving…" : "Save Info"}
             </button>
 
-            {!patientRecord.dischargeDate && (
+            {/* Discharge button logic: Always show if patient record exists.
+                Enable if not fully discharged OR if partially discharged. */}
+            {patientRecord && ( // Ensure patientRecord is loaded before showing button
               <button
-                className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg shadow-sm hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={finalDischarge}
-                disabled={loading || saving} // Disable if overall loading or saving is in progress
+                className={`flex items-center px-4 py-2 text-white rounded-lg shadow-sm transition-colors
+                  ${canInitiateDischarge
+                    ? "bg-red-600 hover:bg-red-700"
+                    : "bg-gray-400 cursor-not-allowed"
+                  } disabled:opacity-50`}
+                onClick={() => setShowDischargeModal(true)} // Open modal on click
+                disabled={Boolean(!canInitiateDischarge || loading || saving)} // Using Boolean() for explicit boolean conversion
               >
-                {loading ? (
+                {loading && canInitiateDischarge ? ( // Only show spinner if actively trying to discharge and can initiate
                   <span className="animate-spin border-2 border-white border-t-transparent h-4 w-4 rounded-full mr-2" />
                 ) : (
                   <UserCheck size={16} className="mr-2" />
                 )}
-                {loading ? "Discharging…" : "Discharge Patient"}
-              </button>
-            )}
-              {patientRecord.dischargeDate && (
-              <button
-                className="flex items-center px-4 py-2 bg-gray-400 text-white rounded-lg shadow-sm cursor-not-allowed"
-                disabled // Keep disabled as the patient is already discharged
-              >
-                <CheckCircle size={16} className="mr-2" />
-                Already Discharged
+                {canInitiateDischarge
+                  ? (loading ? "Processing…" : "Discharge Patient")
+                  : `Already Discharged (${patientRecord.currentDischargeType || 'N/A'})`}
               </button>
             )}
           </div>
@@ -583,21 +656,32 @@ export default function DischargeSummaryPage() {
                   </div>
 
                   <div className="mt-2 text-teal-50 text-sm">
-                    {patientRecord.dischargeDate ? (
+                    {/* Display logic based on currentDischargeType */}
+                    {patientRecord.currentDischargeType === DISCHARGE_TYPES.DISCHARGE_PARTIALLY ? (
+                      <span className="inline-flex items-center">
+                        <AlertTriangle size={14} className="mr-1 text-yellow-300" />
+                        Admitted:{" "}
+                        {patientRecord.admitDate
+                          ? format(parseISO(patientRecord.admitDate), "dd MMM,yyyy")
+                          : "Unknown"}
+                        {" "} (Partially Discharged)
+                      </span>
+                    ) : patientRecord.dischargeDate ? ( // Full discharge or Death
                       <span className="inline-flex items-center">
                         <CheckCircle size={14} className="mr-1" /> Discharged:{" "}
                         {format(
                           parseISO(patientRecord.dischargeDate),
-                          "dd MMM yyyy 'at' HH:mm"
+                          "dd MMM,yyyy 'at' HH:mm"
                         )}
+                        {` (${patientRecord.currentDischargeType || 'Complete'})`}
                       </span>
-                    ) : (
+                    ) : ( // Still Active
                       <span className="inline-flex items-center">
                         <Calendar size={14} className="mr-1" /> Admitted:{" "}
                         {patientRecord.admitDate
                           ? format(
                               parseISO(patientRecord.admitDate),
-                              "dd MMM yyyy"
+                              "dd MMM,yyyy"
                             )
                           : "Unknown"}
                       </span>
@@ -692,7 +776,28 @@ export default function DischargeSummaryPage() {
                     Discharge Status
                   </h3>
                   <div className="space-y-3">
-                    {patientRecord.dischargeDate ? (
+                    {patientRecord.currentDischargeType === DISCHARGE_TYPES.DISCHARGE_PARTIALLY ? (
+                      <div className="flex items-center p-3 bg-orange-50 rounded-lg">
+                        <AlertTriangle
+                          size={20}
+                          className="text-orange-600 mr-3"
+                        />
+                        <div>
+                          <p className="font-medium text-orange-800">
+                            Partially Discharged
+                          </p>
+                          <p className="text-sm text-orange-600">
+                            Billing pending or incomplete discharge.
+                          </p>
+                           {/* Only show "Discharge initiated on" if there's an actual discharge_date */}
+                           {patientRecord.dischargeDate && (
+                             <p className="text-xs text-orange-500 mt-1">
+                               Discharge initiated on: {format(parseISO(patientRecord.dischargeDate), "dd MMM,yyyy 'at' HH:mm")}
+                             </p>
+                           )}
+                        </div>
+                      </div>
+                    ) : patientRecord.dischargeDate ? (
                       <div className="flex items-center p-3 bg-green-50 rounded-lg">
                         <CheckCircle
                           size={20}
@@ -700,12 +805,12 @@ export default function DischargeSummaryPage() {
                         />
                         <div>
                           <p className="font-medium text-green-800">
-                            Patient Discharged
+                            Patient Discharged ({patientRecord.currentDischargeType || 'Complete'})
                           </p>
                           <p className="text-sm text-green-600">
                             {format(
                               parseISO(patientRecord.dischargeDate),
-                              "MMM dd, yyyy 'at' HH:mm"
+                              "MMM dd,yyyy 'at' HH:mm"
                             )}
                           </p>
                         </div>
@@ -791,6 +896,70 @@ export default function DischargeSummaryPage() {
           </div>
         </motion.div>
       </main>
+
+      {/* ─── Discharge Type Selection Modal ───────────────────────── */}
+      <AnimatePresence>
+        {showDischargeModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowDischargeModal(false)} // Close modal when clicking outside
+          >
+            <motion.div
+              initial={{ y: -50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 50, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 200, damping: 25 }}
+              className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md relative"
+              onClick={(e) => e.stopPropagation()} // Prevent modal from closing when clicking inside
+            >
+              <button
+                onClick={() => setShowDischargeModal(false)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <XCircle size={24} />
+              </button>
+              <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">
+                Select Discharge Type
+              </h3>
+
+              <div className="space-y-4">
+                <button
+                  onClick={() => finalDischarge(DISCHARGE_TYPES.DISCHARGE)}
+                  className="w-full flex items-center justify-center px-6 py-4 bg-teal-600 text-white rounded-lg shadow-md hover:bg-teal-700 transition-colors text-lg font-semibold"
+                  disabled={Boolean(loading)} // Using Boolean() for explicit boolean conversion
+                >
+                  <UserCheck size={20} className="mr-3" />
+                  {loading && patientRecord?.currentDischargeType === DISCHARGE_TYPES.DISCHARGE ? "Processing..." : "Discharge Patient (Complete)"}
+                </button>
+                {/* Enable Partially Discharged option unless already fully discharged or death */}
+                <button
+                  onClick={() => finalDischarge(DISCHARGE_TYPES.DISCHARGE_PARTIALLY)}
+                  className={`w-full flex items-center justify-center px-6 py-4 text-white rounded-lg shadow-md transition-colors text-lg font-semibold
+                    ${patientRecord.dischargeDate && patientRecord.currentDischargeType !== DISCHARGE_TYPES.DISCHARGE_PARTIALLY
+                      ? "bg-gray-500 cursor-not-allowed" // Disable if already fully discharged or death
+                      : "bg-yellow-500 hover:bg-yellow-600"
+                    }`}
+                  disabled={Boolean(loading || (patientRecord.dischargeDate && patientRecord.currentDischargeType !== DISCHARGE_TYPES.DISCHARGE_PARTIALLY))} // Using Boolean() for explicit boolean conversion
+                >
+                  <FileText size={20} className="mr-3" />
+                  {loading && patientRecord?.currentDischargeType === DISCHARGE_TYPES.DISCHARGE_PARTIALLY ? "Processing..." : "Discharge Partially (Bill Pending)"}
+                </button>
+                <button
+                  onClick={() => finalDischarge(DISCHARGE_TYPES.DEATH)}
+                  className="w-full flex items-center justify-center px-6 py-4 bg-red-600 text-white rounded-lg shadow-md hover:bg-red-700 transition-colors text-lg font-semibold"
+                  disabled={Boolean(loading)} // Using Boolean() for explicit boolean conversion
+                >
+                  <AlertTriangle size={20} className="mr-3" />
+                  {loading && patientRecord?.currentDischargeType === DISCHARGE_TYPES.DEATH ? "Processing..." : "Mark as Death"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

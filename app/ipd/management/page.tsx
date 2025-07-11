@@ -1,5 +1,5 @@
+// app/ipd/management/page.tsx
 "use client"
-
 import type React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation"
@@ -24,116 +24,90 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import Layout from "@/components/global/Layout"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
-
-// --- Type Definitions (Defined directly in this file) ---
-
-// Optimized PatientDetailSupabase to only include necessary fields
+// --- Type Definitions ---
 interface PatientDetailSupabase {
-  patient_id: number;
-  name: string;
-  number: number | null;
-  age: number | null;
-  gender: string | null;
-  address: string | null;
-  age_unit: string | null;
-  dob: string | null;
-  uhid: string;
+  patient_id: number
+  name: string
+  number: number | null
+  age: number | null
+  gender: string | null
+  address: string | null
+  age_unit: string | null
+  dob: string | null
+  uhid: string
 }
-
-// BedManagementSupabase is already minimal for this display
 interface BedManagementSupabase {
-  id: number;
-  room_type: string;
-  bed_number: number;
-  bed_type: string; // bed_type might not be directly used in the table, but it's part of bed_management, so keeping it
-  status: string; // bed status, not used for patient status, but part of bed data
+  id: number
+  room_type: string
+  bed_number: number
+  bed_type: string
+  status: string
 }
-
-// PaymentDetailItemSupabase: We only need the 'amount' to calculate total deposit.
-// Keeping other fields for now as they are part of the nested structure, but you could omit them if only amount is needed.
 interface PaymentDetailItemSupabase {
-  amount: number;
-  // createdAt: string; // Not used for display
-  // date: string;       // Not used for display
-  // paymentType: string; // Not used for display
-  // type: string;       // Not used for display
+  amount: number
 }
-
-// ServiceDetailItemSupabase: Not directly displayed in the table, can be omitted if not needed for total calculation.
 interface ServiceDetailItemSupabase {
-  // amount: number;       // Only if you were calculating total services for the main table
-  // createdAt: string;
-  // doctorName: string;
-  // serviceName: string;
-  // type: string;
+  // Not fetching these, but keeping interface for BillingRecord consistency if needed later
 }
-
-// Optimized IPDRegistrationSupabase to only include necessary fields
+// New interface for discharge_summaries to get discharge_type
+interface DischargeSummaryRecord {
+  id: string; // UUID of the summary
+  discharge_type: string | null;
+  // Include other fields if you need them from the summary itself for this page
+  // e.g., final_diagnosis: string | null;
+}
+// Updated IPDRegistrationSupabase to include discharge_summaries join
 interface IPDRegistrationSupabase {
-  ipd_id: number;
-  discharge_date: string | null; // Needed for status calculation
-  uhid: string; // Directly needed
-  bed_id: number | null; // Needed for bed_management join
-  payment_detail: PaymentDetailItemSupabase[] | null; // Needed for deposit amount
-
-  // Joins - These are typically single objects, not arrays, when using direct foreign key joins in Supabase.
-  patient_detail: PatientDetailSupabase | null;
-  bed_management: BedManagementSupabase | null;
-
-  // Fields that were previously fetched but are NOT displayed in the current table:
-  // admission_source: string | null;
-  // admission_type: string | null;
-  // under_care_of_doctor: string | null;
-  // service_detail: ServiceDetailItemSupabase[] | null;
-  // created_at: string;
-  // relative_name: string | null;
-  // relative_ph_no: number | null;
-  // relative_address: string | null;
-  // admission_date: string | null;
-  // admission_time: string | null;
+  ipd_id: number
+  discharge_date: string | null // Needed for main status calculation
+  uhid: string
+  bed_id: number | null
+  payment_detail: PaymentDetailItemSupabase[] | null
+  patient_detail: PatientDetailSupabase | null
+  bed_management: BedManagementSupabase | null
+  // Join to discharge_summaries (will be an array if multiple exist, but should be single here)
+  discharge_summaries: DischargeSummaryRecord[] | null;
 }
-
-// BillingRecord remains the same as it's the transformed data for UI
+// BillingRecord now includes dischargeType
 interface BillingRecord {
-  ipdId: string;
-  uhid: string;
-  patientId: number | string;
-  name: string;
-  mobileNumber: string;
-  depositAmount: number;
-  roomType: string;
-  bedNumber: number | string;
-  status: "Discharged" | "Active";
-  dischargeDate: string | null;
-  admissionDate: string | null; // You might want to keep this if the full record is opened later
-  admissionTime: string | null; // You might want to keep this if the full record is opened later
-  age: number | null;
-  gender: string | null;
-  address: string | null;
-  ageUnit: string | null;
-  dob: string | null;
-  relativeName: string | null; // Not currently displayed, but often useful
-  relativePhone: number | null; // Not currently displayed, but often useful
-  relativeAddress: string | null; // Not currently displayed, but often useful
-  paymentDetails: PaymentDetailItemSupabase[] | null; // Needed for full record view / calculation
-  serviceDetails: ServiceDetailItemSupabase[] | null; // Not currently fetched but part of the type
-  admissionSource: string | null; // Not currently displayed
-  admissionType: string | null; // Not currently displayed
-  underCareOfDoctor: string | null; // Not currently displayed
-  // referralDoctor: string | null; // This field was commented out previously for not existing
+  ipdId: string
+  uhid: string
+  patientId: number | string
+  name: string
+  mobileNumber: string
+  depositAmount: number
+  roomType: string
+  bedNumber: number | string
+  // Changed status to reflect specific discharge types
+  status: "Active" | "Discharged" | "Discharged Partially" | "Death"
+  dischargeDate: string | null
+  dischargeType: string | null; // New field to store the specific discharge type
+  admissionDate: string | null
+  admissionTime: string | null
+  age: number | null
+  gender: string | null
+  address: string | null
+  ageUnit: string | null
+  dob: string | null
+  relativeName: string | null
+  relativePhone: number | null
+  relativeAddress: string | null
+  paymentDetails: PaymentDetailItemSupabase[] | null
+  serviceDetails: ServiceDetailItemSupabase[] | null
+  admissionSource: string | null
+  admissionType: string | null
+  underCareOfDoctor: string | null
 }
-
 // --- End Type Definitions ---
-
 export default function IPDManagementPage() {
   const [allIpdRecords, setAllIpdRecords] = useState<IPDRegistrationSupabase[]>([])
   const [searchTerm, setSearchTerm] = useState("")
-  const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">("non-discharge")
+  // Updated selectedTab to include "discharge-partially"
+  const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge" | "discharge-partially">("non-discharge")
   const [selectedWard, setSelectedWard] = useState("All")
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const router = useRouter()
-
   const fetchIPDRecords = useCallback(async () => {
     setIsRefreshing(true)
     try {
@@ -147,19 +121,15 @@ export default function IPDManagementPage() {
           bed_id,
           payment_detail,
           patient_detail (patient_id, name, number, age, gender, address, age_unit, dob, uhid),
-          bed_management (id, room_type, bed_number, bed_type, status)
+          bed_management (id, room_type, bed_number, bed_type, status),
+          discharge_summaries (id, discharge_type) // Fetch discharge_type from summary
           `,
         )
-        // Keep order by created_at even if not selected, as it's for data fetching efficiency/logic
         .order("created_at", { ascending: false })
-
       if (error) {
         console.error("Error fetching IPD records:", error)
         throw error
       }
-
-      // **FIX:** Explicitly cast the fetched data to the expected array type.
-      // This tells TypeScript that patient_detail and bed_management are single objects (or null) per record.
       setAllIpdRecords(data as unknown as IPDRegistrationSupabase[] || [])
     } catch (error) {
       toast.error("Failed to load IPD records.")
@@ -168,30 +138,39 @@ export default function IPDManagementPage() {
       setIsRefreshing(false)
     }
   }, [])
-
   useEffect(() => {
     fetchIPDRecords()
   }, [fetchIPDRecords])
-
-  // Format room type with special cases for ICU and NICU
   const formatRoomType = useCallback((roomType: string) => {
     if (!roomType) return "N/A"
     const upperCaseTypes = ["icu", "nicu"]
     const lowerType = roomType.toLowerCase()
-
     if (upperCaseTypes.includes(lowerType)) {
       return roomType.toUpperCase()
     }
     return roomType.charAt(0).toUpperCase() + roomType.slice(1).toLowerCase()
   }, [])
-
-  // Process raw Supabase data into BillingRecord format
   const processedRecords = useMemo(() => {
     return allIpdRecords.map((record) => {
       const totalDeposit = (record.payment_detail || []).reduce(
         (sum, payment) => sum + (Number(payment.amount) || 0),
         0,
       )
+      // Get discharge_type from the joined discharge_summaries.
+      // Assuming one summary per IPD record, or take the first if multiple somehow.
+      const dischargeSummary = record.discharge_summaries?.[0];
+      const dischargeType = dischargeSummary?.discharge_type || null;
+      let status: BillingRecord["status"];
+      if (record.discharge_date) {
+          // If discharge_date is set in ipd_registration, it's fully discharged or death
+          status = dischargeType === "Death" ? "Death" : "Discharged";
+      } else if (dischargeType === "Discharge Partially") {
+          // If no discharge_date in ipd_registration, but summary says "Discharge Partially"
+          status = "Discharged Partially";
+      } else {
+          // No discharge date and not partially discharged means active
+          status = "Active";
+      }
       return {
         ipdId: String(record.ipd_id),
         uhid: record.uhid,
@@ -201,47 +180,52 @@ export default function IPDManagementPage() {
         depositAmount: totalDeposit,
         roomType: record.bed_management?.room_type ? formatRoomType(record.bed_management.room_type) : "N/A",
         bedNumber: record.bed_management?.bed_number || "N/A",
-        status: record.discharge_date ? "Discharged" : "Active",
+        status: status,
         dischargeDate: record.discharge_date,
-        // These fields are not fetched but are part of BillingRecord.
-        // They will be undefined/null as they are not selected from Supabase.
-        admissionDate: null,
-        admissionTime: null,
+        dischargeType: dischargeType, // Assign the fetched discharge type
+        admissionDate: null, // Not fetched in this query
+        admissionTime: null, // Not fetched in this query
         age: record.patient_detail?.age,
         gender: record.patient_detail?.gender,
         address: record.patient_detail?.address,
         ageUnit: record.patient_detail?.age_unit,
         dob: record.patient_detail?.dob,
-        relativeName: null,
-        relativePhone: null,
-        relativeAddress: null,
-        paymentDetails: record.payment_detail, // Still needed for total deposit calculation
+        relativeName: null, // Not fetched
+        relativePhone: null, // Not fetched
+        relativeAddress: null, // Not fetched
+        paymentDetails: record.payment_detail,
         serviceDetails: null, // Not fetched
         admissionSource: null, // Not fetched
         admissionType: null, // Not fetched
         underCareOfDoctor: null, // Not fetched
       } as BillingRecord
     })
-  }, [allIpdRecords, formatRoomType]) // Added formatRoomType to dependency array
-
+  }, [allIpdRecords, formatRoomType])
   const nonDischargedRecords = useMemo(() => {
     return processedRecords.filter((record) => record.status === "Active")
   }, [processedRecords])
-
-  const dischargedRecords = useMemo(() => {
-    return processedRecords.filter((record) => record.status === "Discharged")
+  const partiallyDischargedRecords = useMemo(() => {
+    return processedRecords.filter((record) => record.status === "Discharged Partially")
   }, [processedRecords])
-
+  const fullyDischargedRecords = useMemo(() => {
+    // This includes "Discharged" (complete) and "Death"
+    return processedRecords.filter((record) => record.status === "Discharged" || record.status === "Death")
+  }, [processedRecords])
   const filteredRecords = useMemo(() => {
-    const currentRecords = selectedTab === "non-discharge" ? nonDischargedRecords : dischargedRecords
+    let currentRecords: BillingRecord[] = [];
+    if (selectedTab === "non-discharge") {
+      currentRecords = nonDischargedRecords;
+    } else if (selectedTab === "discharge-partially") {
+      currentRecords = partiallyDischargedRecords;
+    } else { // selectedTab === "discharge"
+      currentRecords = fullyDischargedRecords;
+    }
     const term = searchTerm.trim().toLowerCase()
     let records = [...currentRecords]
-
     // Ward filtering
     if (selectedWard !== "All") {
       records = records.filter((rec) => rec.roomType.toLowerCase() === selectedWard.toLowerCase())
     }
-
     // Search filtering
     if (term) {
       records = records.filter(
@@ -252,10 +236,8 @@ export default function IPDManagementPage() {
           rec.uhid.toLowerCase().includes(term),
       )
     }
-
     return records
-  }, [nonDischargedRecords, dischargedRecords, searchTerm, selectedTab, selectedWard])
-
+  }, [nonDischargedRecords, partiallyDischargedRecords, fullyDischargedRecords, searchTerm, selectedTab, selectedWard])
   // Get unique ward names from all records for filter options
   const uniqueWards = useMemo(() => {
     const wards = new Set<string>()
@@ -265,12 +247,10 @@ export default function IPDManagementPage() {
       }
     })
     return Array.from(wards)
-  }, [allIpdRecords, formatRoomType]) // Added formatRoomType to dependency array
-
+  }, [allIpdRecords, formatRoomType])
   // Summary stats
   const totalPatients = processedRecords.length
   const totalDeposits = processedRecords.reduce((sum, record) => sum + record.depositAmount, 0)
-
   // Format currency without leading zero issue
   const formatCurrency = useCallback((amount: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -280,35 +260,33 @@ export default function IPDManagementPage() {
       maximumFractionDigits: 0,
     }).format(amount)
   }, [])
-
   // Event handlers
   const handleRowClick = useCallback((record: BillingRecord) => {
     router.push(`/ipd/billing/${record.ipdId}`)
     toast.info(`Navigating to billing for: ${record.name} (UHID: ${record.uhid})`)
   }, [router])
-
   const handleEditRecord = useCallback((e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    // Note: If /ipd/appointment/[ipdId] requires more data than what's fetched here,
-    // you'll need to fetch it within that component or modify this selection.
     router.push(`/ipd/appointment/${record.ipdId}`)
   }, [router])
-
+  // Modified handleManagePatient to route to the new /ipd/manage/[ipdId] page
   const handleManagePatient = useCallback((e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    toast.info(`Manage patient: ${record.name} (UHID: ${record.uhid}) - Not yet implemented`)
-  }, [])
+    router.push(`/ipd/manage/${record.ipdId}`); // Navigate to the new manage page
+    toast.info(`Navigating to Manage page for: ${record.name} (IPD ID: ${record.ipdId})`);
+  }, [router])
 
   const handleDrugChart = useCallback((e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     toast.info(`Drug Chart for: ${record.name} (UHID: ${record.uhid}) - Not yet implemented`)
   }, [])
-
+  // Modified handler for OT form navigation
   const handleOTForm = useCallback((e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    toast.info(`OT Form for: ${record.name} (UHID: ${record.uhid}) - Not yet implemented`)
-  }, [])
-
+    // Navigate to the new OT page with IPD ID
+    router.push(`/ipd/ot/${record.ipdId}`)
+    toast.info(`Navigating to OT Form for: ${record.name} (UHID: ${record.uhid})`)
+  }, [router])
   if (isLoading) {
     return (
       <Layout>
@@ -321,7 +299,6 @@ export default function IPDManagementPage() {
       </Layout>
     )
   }
-
   return (
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -331,7 +308,6 @@ export default function IPDManagementPage() {
             <h1 className="text-4xl font-bold text-slate-800 mb-2">IPD Billing Management</h1>
             <p className="text-slate-500">Manage and track in-patient billing records and admissions</p>
           </div>
-
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             <Card className="bg-white shadow-lg border border-blue-100">
@@ -346,7 +322,6 @@ export default function IPDManagementPage() {
                 <p className="text-xs text-slate-500 mt-1">All IPD patients registered</p>
               </CardContent>
             </Card>
-
             <Card className="bg-white shadow-lg border border-green-100">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-green-600">Total Deposits</CardTitle>
@@ -360,13 +335,12 @@ export default function IPDManagementPage() {
               </CardContent>
             </Card>
           </div>
-
           {/* Tabs & Filters */}
           <Card className="mb-8 shadow-lg border border-slate-200">
             <CardContent className="p-6">
               <Tabs
                 defaultValue="non-discharge"
-                onValueChange={(value) => setSelectedTab(value as "non-discharge" | "discharge")}
+                onValueChange={(value) => setSelectedTab(value as "non-discharge" | "discharge" | "discharge-partially")}
               >
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
                   <div className="overflow-x-auto">
@@ -379,15 +353,21 @@ export default function IPDManagementPage() {
                         Non-Discharged ({nonDischargedRecords.length})
                       </TabsTrigger>
                       <TabsTrigger
+                        value="discharge-partially"
+                        className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:shadow-md transition-all duration-200 px-4 py-2 rounded-md"
+                      >
+                        <Clipboard className="h-4 w-4 mr-2" />
+                        Partially Discharged
+                      </TabsTrigger>
+                      <TabsTrigger
                         value="discharge"
                         className="data-[state=active]:bg-green-600 data-[state=active]:text-white data-[state=active]:shadow-md transition-all duration-200 px-4 py-2 rounded-md"
                       >
                         <CheckCircle className="h-4 w-4 mr-2" />
-                        Discharged ({dischargedRecords.length})
+                        Discharged
                       </TabsTrigger>
                     </TabsList>
                   </div>
-
                   <div className="flex gap-3 items-center w-full md:w-auto">
                     <div className="relative flex-grow">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -401,7 +381,7 @@ export default function IPDManagementPage() {
                     </div>
                     <Button
                       onClick={fetchIPDRecords}
-                      disabled={isRefreshing}
+                      disabled={Boolean(isRefreshing)} // Applied Boolean() fix
                       variant="outline"
                       className="shrink-0 bg-transparent"
                     >
@@ -410,7 +390,6 @@ export default function IPDManagementPage() {
                     </Button>
                   </div>
                 </div>
-
                 <div className="mb-6">
                   <div className="flex items-center gap-2 mb-3">
                     <Home className="h-5 w-5 text-slate-600" />
@@ -444,7 +423,6 @@ export default function IPDManagementPage() {
                     ))}
                   </div>
                 </div>
-
                 <TabsContent value="non-discharge" className="mt-0">
                   {renderPatientsTable(
                     filteredRecords,
@@ -457,7 +435,18 @@ export default function IPDManagementPage() {
                     formatCurrency,
                   )}
                 </TabsContent>
-
+                <TabsContent value="discharge-partially" className="mt-0">
+                  {renderPatientsTable(
+                    filteredRecords,
+                    handleRowClick,
+                    handleEditRecord,
+                    handleManagePatient,
+                    handleDrugChart,
+                    handleOTForm,
+                    isLoading,
+                    formatCurrency,
+                  )}
+                </TabsContent>
                 <TabsContent value="discharge" className="mt-0">
                   {renderPatientsTable(
                     filteredRecords,
@@ -478,7 +467,6 @@ export default function IPDManagementPage() {
     </Layout>
   )
 }
-
 function renderPatientsTable(
   records: BillingRecord[],
   handleRowClick: (record: BillingRecord) => void,
@@ -497,7 +485,6 @@ function renderPatientsTable(
       </div>
     )
   }
-
   if (records.length === 0) {
     return (
       <div className="text-center py-12 bg-white rounded-lg border border-slate-200 shadow-sm">
@@ -507,7 +494,6 @@ function renderPatientsTable(
       </div>
     )
   }
-
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-md bg-white">
       <table className="w-full text-sm">
@@ -546,6 +532,14 @@ function renderPatientsTable(
                 {record.status === "Discharged" ? (
                   <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
                     Discharged
+                  </Badge>
+                ) : record.status === "Discharged Partially" ? (
+                  <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                    Partially Discharged
+                  </Badge>
+                ) : record.status === "Death" ? (
+                  <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                    Death
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">

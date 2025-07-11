@@ -57,6 +57,7 @@ export interface PatientDetail {
 
 // Represents a doctor record as fetched from Supabase's doctor table
 export interface Doctor {
+  opd_charge(index: number, arg1: string, opd_charge: any): unknown
   id: string // Doctor's unique ID
   dr_name: string // Doctor's name
   department: string
