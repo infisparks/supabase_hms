@@ -1,5 +1,4 @@
 "use client"
-
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useForm, Controller, FormProvider, useFieldArray } from "react-hook-form"
 import { ToastContainer, toast } from "react-toastify"
@@ -63,7 +62,7 @@ import {
   Casualty,
   CardiologyStudyOptions,
   type ServiceOption,
-} from "@/app/opd/types" // IMPORTANT: Ensure your ModalitySelection, Doctor types are updated here.
+} from "@/app/opd/types"
 
 // Ensure correct path to your action functions
 import {
@@ -77,7 +76,6 @@ import {
 import { openBillInNewTabProgrammatically } from "./bill-generator"
 import Layout from "@/components/global/Layout"
 
-// Helper functions (kept at top-level scope)
 function formatAMPM(date: Date): string {
   const h = date.getHours()
   const m = date.getMinutes()
@@ -170,7 +168,7 @@ const AppointmentPage = () => {
   } = form
 
   /* --------------------------------------------------------------------- */
-  /* COMBINE RHF REF + LOCAL REF                                           */
+  /* COMBINE RHF REF + LOCAL REF                                          */
   /* --------------------------------------------------------------------- */
   const nameField = register("name", { required: "Name is required" })
   const phoneField = register("phone", {
@@ -352,7 +350,7 @@ const AppointmentPage = () => {
   const calculateTotalAmountPaid = () => (Number(watch("cashAmount")) || 0) + (Number(watch("onlineAmount")) || 0)
 
   const addModality = (type: ModalitySelection["type"]) =>
-    append({ id: Math.random().toString(36).substr(2, 9), type, charges: 0, doctor: "", service: "" }) // Added service: "" default
+    append({ id: Math.random().toString(36).substr(2, 9), type, charges: 0, doctor: "" })
 
   const removeModality = (index: number) => {
     remove(index)
@@ -461,7 +459,7 @@ const AppointmentPage = () => {
     uhid: string | null,
     billNo: number | null,
     appointmentType: "visithospital" | "oncall",
-    modalities: ModalitySelection[], // Now contains doctor name
+    modalities: ModalitySelection[],
     totalCharges: number,
     discount: number
   ) => {
@@ -479,8 +477,7 @@ const AppointmentPage = () => {
       if (modalities && modalities.length > 0) {
         message += `*Services Booked:*\n`
         modalities.forEach((modality, index) => {
-          // modality.doctor is already the name here because of `onValueChange` logic
-          const doctorName = modality.doctor || "N/A"
+          const doctorName = doctors.find((d) => d.id === modality.doctor)?.dr_name || "N/A"
           const serviceName = modality.service || modality.type; // Use custom service name if available, otherwise modality type
           message += `  ${index + 1}. *${serviceName}* (Dr. ${doctorName}) - ₹${modality.charges}\n`
         })
@@ -531,17 +528,12 @@ const AppointmentPage = () => {
     try {
       if (!d.opdType) d.opdType = d.appointmentType === "visithospital" ? "OPD" : "On-Call"
       if (d.appointmentType === "visithospital" && !d.modalities.length) return toast.error("Add at least one service.")
-      // Ensure doctor field for each modality is filled if it's a doctor-dependent type
-      if (d.appointmentType === "visithospital" && 
-          d.modalities.some((m) => 
-            (m.type === "consultation" || m.type === "casualty" || m.type === "custom") && 
-            (!m.doctor || !String(m.doctor).trim()))) {
-          return toast.error("Doctor required for consultation, casualty, and custom services.");
-      }
-      
+      if (d.appointmentType === "visithospital" && d.modalities.some((m) => !m.doctor || !String(m.doctor).trim()))
+        return toast.error("Doctor required on every service.")
+
       const res = await createAppointment(
         d,
-        watchedModalities, // Pass modalities which now contain doctor name
+        watchedModalities,
         totalModalityCharges,
         calculateTotalAmountPaid(),
         selectedPatient?.patient_id || null,
@@ -1109,20 +1101,7 @@ const AppointmentPage = () => {
                                       </Label>
                                       <Select
                                         value={modality.doctor || ""}
-                                        onValueChange={(doctorId: string) => {
-                                          const selectedDoctor = doctors.find((d) => d.id === doctorId);
-                                          // Store doctor's name, not ID
-                                          updateModalityField(index, "doctor", selectedDoctor?.dr_name || "");
-                                          // Automatically set specialist if available
-                                          if (selectedDoctor?.specialist) {
-                                            updateModalityField(index, "specialist", selectedDoctor.specialist);
-                                          }
-                                          // Automatically set charges for consultation if doctor has default charges
-                                          if (modality.type === "consultation" && selectedDoctor?.opd_charge) {
-                                            updateModalityField(index, "charges", selectedDoctor.opd_charge);
-                                            updateModalityField(index, "visitType", "first"); // Default to first visit
-                                          }
-                                        }}
+                                        onValueChange={(value) => updateModalityField(index, "doctor", value)} // Use modified handler
                                       >
                                         <SelectTrigger
                                           className={`h-9 text-sm ${
@@ -1133,7 +1112,7 @@ const AppointmentPage = () => {
                                         </SelectTrigger>
                                         <SelectContent>
                                           {doctors.map((doctor) => (
-                                            <SelectItem key={doctor.id} value={doctor.id}> {/* Use doctor.id for value */}
+                                            <SelectItem key={doctor.id} value={doctor.id}>
                                               {doctor.dr_name}
                                             </SelectItem>
                                           ))}
@@ -1151,7 +1130,7 @@ const AppointmentPage = () => {
                                           <Label className="text-xs">Specialist</Label>
                                           <Select
                                             value={modality.specialist || ""}
-                                            onValueChange={(value) => updateModalityField(index, "specialist", value)}
+                                            onValueChange={(value) => updateModalityField(index, "specialist", value)} // Use modified handler
                                           >
                                             <SelectTrigger className="h-9 text-sm">
                                               <SelectValue placeholder="Select specialist" />
@@ -1175,7 +1154,7 @@ const AppointmentPage = () => {
                                           <Select
                                             value={modality.visitType || ""}
                                             onValueChange={(value) => {
-                                              const doctor = doctors.find((d) => d.dr_name === modality.doctor) // Find by name
+                                              const doctor = doctors.find((d) => d.id === modality.doctor)
                                               let charges = 0
                                               if (doctor?.charges?.[0]) {
                                                 const chargeData = doctor.charges[0]
@@ -1188,8 +1167,8 @@ const AppointmentPage = () => {
                                                   charges = chargeData.followUpCharge
                                                 }
                                               }
-                                              updateModalityField(index, "visitType", value as "first" | "followup")
-                                              updateModalityField(index, "charges", charges)
+                                              updateModalityField(index, "visitType", value as "first" | "followup") // Use modified handler
+                                              updateModalityField(index, "charges", charges) // Update charges too
                                             }}
                                           >
                                             <SelectTrigger className="h-9 text-sm">
@@ -1234,8 +1213,8 @@ const AppointmentPage = () => {
                                           onValueChange={(value) => {
                                             const serviceOptions = getServiceOptions(modality.type)
                                             const selectedService = serviceOptions.find((s) => s.service === value)
-                                            updateModalityField(index, "service", value)
-                                            updateModalityField(index, "charges", selectedService?.amount || 0)
+                                            updateModalityField(index, "service", value) // Use modified handler
+                                            updateModalityField(index, "charges", selectedService?.amount || 0) // Update charges too
                                           }}
                                         >
                                           <SelectTrigger className="h-9 text-sm">

@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase"
 import { generateNextUHID } from "@/components/uhid-generator" // Import the new UHID generator
-import type { IFormInput, ModalitySelection, PatientDetail, Doctor, OnCallAppointment } from "@/app/opd/types"
+import type { IFormInput, ModalitySelection, PatientDetail, Doctor, OnCallAppointment } from "@/app/opd/types" // Ensure ModalitySelection allows string for doctor
+
 
 interface CreateAppointmentResult {
   success: boolean
@@ -24,7 +25,7 @@ export async function searchPatientByUhId(uhid: string) {
     if (!data) {
       return { success: false, message: "Patient not found with this UHID." }
     }
-    return { success: true, patient: data }
+    return { success: true, patient: data as PatientDetail } // Explicitly cast data to PatientDetail
   } catch (error: any) {
     console.error("Error in searchPatientByUhId:", error)
     return { success: false, message: "Failed to search patient by UHID: " + error.message }
@@ -49,7 +50,7 @@ export async function searchPatientsByPhoneNumber(phoneNumber: string) {
     if (!data || data.length === 0) {
       return { success: false, message: "No patients found with this phone number." }
     }
-    return { success: true, patients: data }
+    return { success: true, patients: data as PatientDetail[] } // Explicitly cast data to PatientDetail[]
   } catch (error: any) {
     console.error("Error in searchPatientsByPhoneNumber:", error)
     return { success: false, message: "Failed to search patients by phone number: " + error.message }
@@ -58,7 +59,7 @@ export async function searchPatientsByPhoneNumber(phoneNumber: string) {
 
 export async function createAppointment(
   formData: IFormInput,
-  selectedModalities: ModalitySelection[],
+  selectedModalities: ModalitySelection[], // This now directly contains doctor name
   totalCharges: number,
   amountPaid: number,
   existingPatientId: number | null = null,
@@ -100,17 +101,19 @@ export async function createAppointment(
           dob: dob,
           gender: formData.gender || null,
           address: formData.address?.trim() || null,
-          // Removed: updated_at: currentTimestamp, // Rely on Supabase default if it's set to now()
+          // `updated_at` relies on Supabase column default if set to `now()`
         })
         .eq("patient_id", patientIdToUse)
+        .eq("uhid", uhidToUse) // Ensure updating by both patient_id and uhid if composite key
         .select()
         .single()
       if (updateError) {
         console.error("Patient update error:", updateError)
         throw updateError
       }
-      newPatientData = data
+      newPatientData = data as PatientDetail
       uhidToUse = data.uhid
+      patientIdToUse = data.patient_id; // Ensure patientIdToUse is updated from DB response
     } else {
       // New patient: Generate UHID and insert new record
       const uhidGenResult = await generateNextUHID()
@@ -129,8 +132,7 @@ export async function createAppointment(
           gender: formData.gender || null,
           address: formData.address?.trim() || null,
           uhid: uhidToUse,
-          // Removed: created_at: currentTimestamp, // Rely on Supabase default if it's set to now()
-          // Removed: updated_at: currentTimestamp, // Rely on Supabase default if it's set to now()
+          // `created_at` and `updated_at` rely on Supabase column defaults if set to `now()`
         })
         .select()
         .single()
@@ -138,7 +140,7 @@ export async function createAppointment(
         console.error("Patient insert error:", insertError)
         throw insertError
       }
-      newPatientData = data
+      newPatientData = data as PatientDetail
       patientIdToUse = data.patient_id
     }
 
@@ -154,12 +156,12 @@ export async function createAppointment(
         .insert({
           patient_id: patientIdToUse,
           uhid: uhidToUse,
-          date: currentDateString,
+          date: currentDateString, // `date` is `timestamp with time zone` defaulted to Asia/Kolkata
           time: formData.time,
           referredBy: formData.referredBy?.trim() || null,
           additional_notes: formData.additionalNotes?.trim() || null,
           entered_by: "system_user",
-          // Removed: created_at: currentTimestamp, // Rely on Supabase default if it's set to now()
+          // `created_at` relies on Supabase column default if set to `now()`
         })
         .select()
         .single()
@@ -176,7 +178,7 @@ export async function createAppointment(
 
       const serviceInfo = selectedModalities.map((modality) => ({
         type: modality.type,
-        doctor: modality.doctor || null, // Doctor is now mandatory, but setting null if missing to avoid DB error for now
+        doctor: modality.doctor, // This is now already the doctor's name (string)
         specialist: modality.specialist || null,
         visitType: modality.visitType || null,
         service: modality.service || null,
@@ -192,7 +194,7 @@ export async function createAppointment(
         onlineAmount: Number(formData.onlineAmount) || 0,
         cashThrough: formData.cashThrough || null,
         onlineThrough: formData.onlineThrough || null,
-        // Removed: createdAt: currentTimestamp, // Rely on Supabase default if it's set to now()
+        // `createdAt` relies on Supabase column default if set to `now()`
       }
 
       const { data: opdRegistrationData, error: opdRegistrationError } = await supabase
@@ -200,12 +202,12 @@ export async function createAppointment(
         .insert({
           patient_id: patientIdToUse,
           uhid: uhidToUse,
-          date: currentDateString,
+          date: currentDateString, // `date` is `timestamp with time zone` defaulted to Asia/Kolkata
           refer_by: formData.referredBy?.trim() || null,
           "additional Notes": formData.additionalNotes?.trim() || null,
           service_info: serviceInfo,
           payment_info: paymentInfo,
-          // Removed: created_at: currentTimestamp, // Rely on Supabase default if it's set to now()
+          // `created_at` relies on Supabase column default if it's set to `now()`
         })
         .select("opd_id, bill_no")
         .single()
@@ -236,7 +238,7 @@ export async function createAppointment(
             cash: (currentSummary.cash || 0) + (Number(formData.cashAmount) || 0),
             online: (currentSummary.online || 0) + (Number(formData.onlineAmount) || 0),
             discount: (currentSummary.discount || 0) + (Number(formData.discount) || 0),
-            // Removed: updated_at: currentTimestamp, // Rely on Supabase default if it's set to now()
+            // `updated_at` relies on Supabase column default if it's set to `now()`
           })
           .eq("date", currentDateString)
         if (updateSummaryError) {
@@ -251,8 +253,7 @@ export async function createAppointment(
           cash: Number(formData.cashAmount) || 0,
           online: Number(formData.onlineAmount) || 0,
           discount: Number(formData.discount) || 0,
-          // Removed: created_at: currentTimestamp, // Rely on Supabase default if it's set to now()
-          // Removed: updated_at: currentTimestamp, // Rely on Supabase default if it's set to now()
+          // `created_at` and `updated_at` rely on Supabase column defaults if set to `now()`
         })
         if (insertSummaryError) {
           console.error("Error inserting new OPD summary:", insertSummaryError)
@@ -279,15 +280,14 @@ export async function updateAppointment(
   selectedModalities: ModalitySelection[],
   totalCharges: number,
   amountPaid: number,
-  patientId: number, // Changed type from number | null to number
-  uhid: string, // Changed type from string | null to string
+  patientId: number,
+  uhid: string,
 ): Promise<CreateAppointmentResult> {
   try {
-    // Log values for debugging
     console.log("updateAppointment called with:")
-    console.log("  opdId:", opdId)
-    console.log("  patientId:", patientId)
-    console.log("  uhid:", uhid)
+    console.log("   opdId:", opdId)
+    console.log("   patientId:", patientId)
+    console.log("   uhid:", uhid)
 
     if (!patientId || !uhid) {
       console.error("Validation failed: Patient ID or UHID is missing for update.")
@@ -311,7 +311,7 @@ export async function updateAppointment(
       }
     }
 
-    // 2. Update Patient Details (using composite primary key)
+    // 2. Update Patient Details
     const { error: patientUpdateError } = await supabase
       .from("patient_detail")
       .update({
@@ -324,7 +324,7 @@ export async function updateAppointment(
         address: formData.address?.trim() || null,
       })
       .eq("patient_id", patientId)
-      .eq("uhid", uhid) // Re-added this condition for composite primary key
+      .eq("uhid", uhid)
     if (patientUpdateError) {
       console.error("Error updating patient details:", patientUpdateError)
       throw patientUpdateError
@@ -333,7 +333,7 @@ export async function updateAppointment(
     // 3. Update OPD Registration
     const serviceInfo = selectedModalities.map((modality) => ({
       type: modality.type,
-      doctor: modality.doctor || null,
+      doctor: modality.doctor, // This is now already the doctor's name (string)
       specialist: modality.specialist || null,
       visitType: modality.visitType || null,
       service: modality.service || null,
@@ -358,8 +358,6 @@ export async function updateAppointment(
         "additional Notes": formData.additionalNotes?.trim() || null,
         service_info: serviceInfo,
         payment_info: paymentInfo,
-        // date and time are usually not updated for an existing appointment,
-        // but if needed, they would be formData.date and formData.time
       })
       .eq("opd_id", opdId)
     if (opdUpdateError) {
@@ -368,8 +366,6 @@ export async function updateAppointment(
     }
 
     // Note: OPD summary is NOT updated here.
-    // Updating summary for existing appointments requires more complex logic
-    // to adjust previous day's totals if charges/payment methods change.
     return { success: true, message: "Appointment updated successfully!" }
   } catch (error: any) {
     console.error("Failed to update appointment:", error)
@@ -402,7 +398,7 @@ export async function fetchOnCallAppointmentsSupabase(): Promise<OnCallAppointme
       additional_notes,
       entered_by,
       created_at,
-      patient_detail (name, number, age, gender, age_unit, dob, address) // Include all fields that PatientDetail might have
+      patient_detail (uhid, name, number, age, gender, age_unit, dob, address) // Include uhid, name, number, age, gender, age_unit, dob, address
       `,
     )
     .order("created_at", { ascending: false })
@@ -412,7 +408,7 @@ export async function fetchOnCallAppointmentsSupabase(): Promise<OnCallAppointme
   }
   return data.map((item: any) => ({
     oncall_id: item.oncall_id,
-    patient_id: item.patient_id,
+    patient_id: item.patient_id, // patient_id is bigint, matches DB
     uhid: item.uhid,
     date: item.date,
     time: item.time,
@@ -420,8 +416,9 @@ export async function fetchOnCallAppointmentsSupabase(): Promise<OnCallAppointme
     additional_notes: item.additional_notes,
     entered_by: item.entered_by,
     created_at: item.created_at,
-    patient_detail: item.patient_detail // Supabase should return null if no join, which is fine for mapping
+    patient_detail: item.patient_detail // Supabase should return object if joined, null if no match
       ? {
+          uhid: item.patient_detail.uhid, // Ensure all fields from PatientDetailFromSupabase are mapped
           name: item.patient_detail.name,
           number: item.patient_detail.number,
           age: item.patient_detail.age,
@@ -429,10 +426,9 @@ export async function fetchOnCallAppointmentsSupabase(): Promise<OnCallAppointme
           age_unit: item.patient_detail.age_unit,
           dob: item.patient_detail.dob,
           address: item.patient_detail.address,
-          // uhid is already at the top level of OnCallAppointment, no need to duplicate
-        }
-      : { name: null, number: null, age: null, gender: null, age_unit: null, dob: null, address: null }, // Provide default empty object if patient_detail is null
-  })) as OnCallAppointment[]
+        } as PatientDetail // Explicitly cast to PatientDetail
+      : { uhid: null, name: null, number: null, age: null, gender: null, age_unit: null, dob: null, address: null }, // Provide default nulls for fields if patient_detail is null
+  })) as OnCallAppointment[] // Explicitly cast the whole array
 }
 
 // Function to delete an on-call appointment
