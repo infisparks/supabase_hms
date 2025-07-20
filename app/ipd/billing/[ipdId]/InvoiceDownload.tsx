@@ -286,7 +286,7 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
           "Dear Patient, please find attached your invoice PDF for your recent visit. Thank you for choosing our services.",
       }
 
-      const response = await fetch("https://wa.medblisss.com/send-image-url", { // Assuming this endpoint accepts imageUrl for PDFs
+      const response = await fetch("https://a.infispark.in/send-image-url", { // Assuming this endpoint accepts imageUrl for PDFs
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

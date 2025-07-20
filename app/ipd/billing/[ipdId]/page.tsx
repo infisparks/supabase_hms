@@ -605,7 +605,7 @@ export default function BillingPage() {
     updatedDeposit: number,
     amountType: "advance" | "refund" | "deposit" | "settlement", // Corrected type for notification
   ) => {
-    const apiUrl = "https://wa.medblisss.com/send-text"
+    const apiUrl = "https://a.infispark.in/send-text"
     let message = ""
     if (amountType === "advance" || amountType === "deposit" || amountType === "settlement") {
       message = `Dear ${patientName}, your payment of Rs ${paymentAmount.toLocaleString()} has been successfully added to your account. Your updated total deposit is Rs ${updatedDeposit.toLocaleString()}. Thank you for choosing our service.`
