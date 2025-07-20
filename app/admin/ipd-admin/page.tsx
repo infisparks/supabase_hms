@@ -38,19 +38,83 @@ import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, L
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import Layout from "@/components/global/Layout" // Assuming your global layout component
 
-// Re-using types from your provided BillingPage for consistency
-interface PatientDetailSupabase {
-  patient_id: number
-  name: string
-  number: number | null
+// Register Chart.js components
+import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip as ChartTooltip, Legend as ChartLegend } from "chart.js" // Renamed to avoid conflict
+import { Bar } from "react-chartjs-2" // Correctly import the Bar component
+ChartJS.register(BarElement, CategoryScale, LinearScale, ChartTooltip, ChartLegend)
+
+
+// ----- Type Definitions (from your DashboardPage, for consistency) -----
+
+// Doctor info (fetched separately)
+interface Doctor {
+  id: string // Assuming doctor ID is a string/UUID, or number if you changed it
+  dr_name: string // Changed from 'name' to 'dr_name' to match DB
+  opd_charge?: number
+  department?: string
+  specialist?: string
+}
+
+// Modality/Service info (from OPD service_info JSONB)
+interface IModality {
+  charges: number
+  doctor?: string // This will now store doctor name if available, not ID
+  specialist?: string
+  type: "consultation" | "casualty" | "xray" | "pathology" | "ipd" | "radiology" | "custom"
+  visitType?: string
+  service?: string
+}
+
+// Payment info (from OPD payment_info JSONB)
+interface IPayment {
+  cashAmount: number
+  createdAt: string
+  discount: number
+  onlineAmount: number
+  paymentMethod: string
+  totalCharges: number
+  totalPaid: number
+}
+
+// Patient detail structure as it would appear in the patient_detail table
+interface PatientDetailFromSupabase {
+  patient_id: number; // Added missing property
+  uhid: string
+  name: string | null // Allowed to be null
+  number: string | null // Assuming it can be null in DB
   age: number | null
   gender: string | null
   address: string | null
-  age_unit: string | null
-  dob: string | null
-  uhid: string
+  age_unit: string | null; // Added missing property
+  dob: string | null; // Added missing property
 }
 
+// IPD Service (from IPD `service_detail` JSONB)
+// Adjusted for new IPDService structure from DashboardPage
+interface IPDService {
+  id?: string; // Added id for consistency, though not strictly required for display
+  amount: number
+  serviceName: string
+  type: string // "service" or "doctorvisit"
+  doctorName?: string
+  createdAt: string // ISO string
+}
+
+// IPD Payment (from IPD `payment_detail` JSONB)
+// Adjusted for new IPDPayment structure from DashboardPage
+interface IPDPayment {
+  id?: string // UUID from DB or generated, optional
+  amount: number
+  paymentType: "cash" | "online" | "bill_reduction" | string // Added string for flexibility
+  type: "advance" | "refund" | "deposit" | "discount" | "settlement" | string // Added settlement and string
+  date: string // ISO string
+  createdAt: string // ISO string
+  through?: string // Added 'through' for online/cash payments
+  transactionType?: string; // Added based on your example
+  amountType?: string; // Added based on your example
+}
+
+// Bed Management details (defined here to resolve forward reference)
 interface BedManagementSupabase {
   id: number
   room_type: string
@@ -59,72 +123,171 @@ interface BedManagementSupabase {
   status: string
 }
 
-interface PaymentDetailItemSupabase {
-  id: string
-  amount: number
-  createdAt: string
-  date: string
-  paymentType: string
-  type: "advance" | "refund" | "deposit" | "discount"
-  through?: string
-}
-
-interface ServiceDetailItemSupabase {
-  id: string
-  amount: number
-  createdAt: string
-  doctorName: string
-  serviceName: string
-  type: "service" | "doctorvisit"
-}
-
-interface IPDRegistrationSupabaseJoined {
+// IPD Registration (from Supabase `ipd_registration` table)
+interface IPDRegistrationSupabaseJoined { // Renamed from your original `IPDRegistrationSupabaseJoined` to match IPD section
   ipd_id: number
-  admission_source: string | null
-  admission_type: string | null
-  under_care_of_doctor: string | null
-  payment_detail: PaymentDetailItemSupabase[] | null
-  bed_id: bigint | null
-  service_detail: ServiceDetailItemSupabase[] | null
-  created_at: string
-  discharge_date: string | null
-  relative_name: string | null
-  relative_ph_no: number | null
-  relative_address: string | null
-  admission_date: string | null
-  admission_time: string | null
   uhid: string
-  patient_detail: PatientDetailSupabase | null
-  bed_management: BedManagementSupabase | null
+  admission_date: string // date (YYYY-MM-DD string as in your INSERT)
+  admission_time: string | null // time (HH:mm string as in your INSERT)
+  under_care_of_doctor: string | null // Now storing doctor's name (string)
+  payment_detail: IPDPayment[] | null // JSONB
+  service_detail: IPDService[] | null // JSONB
+  created_at: string // timestamp with time zone (UTC ISO string)
+  bed_id: number | null
+  bed_management: BedManagementSupabase | null; // Corrected to single object after join
+  patient_detail: PatientDetailFromSupabase | null; // Corrected to single object after join
+  admission_source: string | null;
+  admission_type: string | null;
+  discharge_date: string | null;
+  relative_name: string | null;
+  relative_ph_no: number | null;
+  relative_address: string | null;
 }
 
-export interface BillingRecord {
-  patientId: string
+// OT Details (from Supabase `ot_details` table)
+interface OTDetailsSupabase {
+  id: string // UUID of the OT record
+  ipd_id: number | null // bigint null in schema
   uhid: string
-  ipdId: string
-  name: string
-  mobileNumber: string
-  address?: string | null
-  age?: number | null
-  ageUnit?: string | null
-  gender?: string | null
-  dob?: string | null
-  relativeName?: string | null
-  relativePhone?: number | null
-  relativeAddress?: string | null
-  dischargeDate?: string | null
-  totalDeposit: number
-  roomType?: string | null
-  bedNumber?: number | string | null
-  bedType?: string | null
-  services: ServiceDetailItemSupabase[]
-  payments: PaymentDetailItemSupabase[]
-  discount: number
-  admitDate?: string | null
-  admissionTime?: string | null
-  createdAt?: string
-  doctor?: string | null
+  ot_type: "Major" | "Minor"
+  ot_notes: string | null
+  ot_date: string // timestamp with time zone (UTC ISO string from DB, even if default is Asia/Kolkata)
+  created_at: string // timestamp with time zone (UTC ISO string from DB, even if default is Asia/Kolkata)
+  // FIX: Switched to a LEFT join, so the result can be null.
+  patient_detail: PatientDetailFromSupabase[] | null
 }
+
+// Combined types for display in tables/modals (these are simplified, use the full fetched types)
+interface OPDAppointmentDisplay {
+  type: "OPD"
+  id: string
+  patientId: string
+  name: string
+  phone: string
+  date: string
+  time: string
+  modalities: IModality[]
+  payment: IPayment
+  message: string
+  opd_id: string
+  created_at: string
+  refer_by: string | null
+  additional_notes: string | null
+  service_info: IModality[] | null
+  payment_info: IPayment | null
+  bill_no: number
+  patient_uhid_from_opd_table: string
+  appointment_type?: string | null
+  visit_type?: string | null
+}
+
+interface IPDAppointmentDisplay {
+  type: "IPD"
+  id: string
+  patientId: string
+  name: string
+  phone: string
+  totalAmount: number // Calculated gross service amount (total services, not deposit)
+  totalDeposit: number // Calculated sum of actual deposits (advance, deposit, settlement)
+  totalRefunds: number // Calculated total refunds
+  discount: number // Calculated discount
+  remainingAmount: number // Calculated remaining amount
+  roomType: string
+  ipd_id: number
+  uhid: string
+  admission_date: string
+  admission_time: string | null
+  under_care_of_doctor: string | null
+  payment_detail: IPDPayment[] | null
+  service_detail: IPDService[] | null
+  created_at: string
+  bed_id: number | null
+}
+
+interface OTAppointmentDisplay {
+  type: "OT"
+  id: string
+  patientId: string
+  name: string
+  phone: string
+  date: string
+  time: string
+  message: string
+  ipd_id: number | null
+  uhid: string
+  ot_type: "Major" | "Minor"
+  ot_notes: string | null
+  ot_date: string
+  created_at: string
+}
+
+type CombinedAppointment = OPDAppointmentDisplay | IPDAppointmentDisplay | OTAppointmentDisplay
+
+// BillingRecord - simplified for history modal display, derived from IPDRegistrationSupabaseJoined
+export interface BillingRecord {
+  patientId: string; // patient_detail.patient_id
+  uhid: string; // ipd_registration.uhid
+  ipdId: string; // ipd_registration.ipd_id
+  name: string; // patient_detail.name
+  mobileNumber: string; // patient_detail.number
+  address?: string | null; // patient_detail.address
+  age?: number | null; // patient_detail.age
+  ageUnit?: string | null; // patient_detail.age_unit
+  gender?: string | null; // patient_detail.gender
+  dob?: string | null; // patient_detail.dob
+  relativeName?: string | null; // ipd_registration.relative_name
+  relativePhone?: number | null; // ipd_registration.relative_ph_no
+  relativeAddress?: string | null; // ipd_registration.relative_address
+  dischargeDate?: string | null; // ipd_registration.discharge_date
+  // Corrected: These now represent actual financial summaries based on parsed payments
+  totalGrossBill: number; // Sum of all services
+  totalPaidAmount: number; // Sum of advances + deposits + settlements
+  totalRefundedAmount: number; // Sum of refunds
+  totalDiscountAmount: number; // Sum of discounts
+  netBalance: number; // totalGrossBill - totalPaidAmount - totalDiscountAmount + totalRefundedAmount
+  roomType?: string | null; // bed_management.room_type
+  bedNumber?: number | string | null; // bed_management.bed_number
+  bedType?: string | null; // bed_management.bed_type
+  services: IPDService[]; // ipd_registration.service_detail
+  payments: IPDPayment[]; // ipd_registration.payment_detail
+  admitDate?: string | null; // ipd_registration.admission_date
+  admissionTime?: string | null; // ipd_registration.admission_time
+  createdAt?: string; // ipd_registration.created_at
+  doctor?: string | null; // ipd_registration.under_care_of_doctor
+}
+
+
+// Define the target timezone offset for display
+// Mumbai (Asia/Kolkata) is UTC+5:30.
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000 // 5 hours 30 minutes in milliseconds
+
+// ----- Manual Timezone Conversion Helpers (TOP-LEVEL SCOPE) -----
+
+// Formats a number as Indian Rupee currency
+const formatCurrency = (amount: number) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(amount)
+
+// Formats bytes into human-readable units (not directly used here, but kept from previous code)
+const formatBytes = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} bytes`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+// Converts a UTC Date object to a Date object representing the time in IST
+const toIST = (utcDate: Date): Date => {
+  return new Date(utcDate.getTime() + IST_OFFSET_MS)
+}
+
+// Converts an IST Date object to a Date object representing the time in UTC (for Supabase query)
+const fromIST = (istDate: Date): Date => {
+  return new Date(istDate.getTime() - IST_OFFSET_MS)
+}
+
 
 export default function IPDAdminPage() {
   const router = useRouter()
@@ -156,12 +319,14 @@ export default function IPDAdminPage() {
         return
       }
 
-      const now = new Date()
-      const today = format(now, "yyyy-MM-dd")
-      const startOfCurrentWeek = startOfWeek(now, { weekStartsOn: 1 }) // Monday as start of week
-      const endOfCurrentWeek = endOfWeek(now, { weekStartsOn: 1 })
-      const startOfCurrentMonth = startOfMonth(now)
-      const endOfCurrentMonth = endOfMonth(now)
+      const now = new Date() // Current system time (likely UTC for Supabase server's created_at)
+      const nowInIST = toIST(now); // Convert current system time to IST for accurate "today" calculations
+      const todayIST = format(startOfDay(nowInIST), "yyyy-MM-dd"); // Start of today in IST
+      const startOfCurrentWeekIST = startOfWeek(nowInIST, { weekStartsOn: 1 }); // Monday in IST
+      const endOfCurrentWeekIST = endOfWeek(nowInIST, { weekStartsOn: 1 }); // Sunday in IST
+      const startOfCurrentMonthIST = startOfMonth(nowInIST);
+      const endOfCurrentMonthIST = endOfMonth(nowInIST);
+
 
       let todayCount = 0
       let thisWeekCount = 0
@@ -170,22 +335,23 @@ export default function IPDAdminPage() {
       const admissionsByDate: Record<string, number> = {}
 
       data.forEach((record) => {
-        const createdAt = parseISO(record.created_at)
-        const recordDate = format(createdAt, "yyyy-MM-dd")
+        // Parse the created_at string, then convert it to IST for comparison
+        const createdAtIST = toIST(parseISO(record.created_at))
+        const recordDateIST = format(createdAtIST, "yyyy-MM-dd") // Date string in IST for comparison
 
         // For summary counts
-        if (recordDate === today) {
+        if (recordDateIST === todayIST) { // Compare with IST date string
           todayCount++
         }
-        if (isWithinInterval(createdAt, { start: startOfCurrentWeek, end: endOfCurrentWeek })) {
+        if (isWithinInterval(createdAtIST, { start: startOfCurrentWeekIST, end: endOfCurrentWeekIST })) {
           thisWeekCount++
         }
-        if (isWithinInterval(createdAt, { start: startOfCurrentMonth, end: endOfCurrentMonth })) {
+        if (isWithinInterval(createdAtIST, { start: startOfCurrentMonthIST, end: endOfCurrentMonthIST })) {
           thisMonthCount++
         }
 
         // For trend data (last 30 days)
-        const dateKey = format(createdAt, "MMM dd")
+        const dateKey = format(createdAtIST, "MMM dd") // Use IST date for trend data keys
         admissionsByDate[dateKey] = (admissionsByDate[dateKey] || 0) + 1
       })
 
@@ -198,8 +364,8 @@ export default function IPDAdminPage() {
       // Generate trend data for the last 30 days, ensuring all days are present
       const trendData = []
       for (let i = 29; i >= 0; i--) {
-        const date = subDays(now, i)
-        const formattedDate = format(date, "MMM dd")
+        const dateInIST = subDays(nowInIST, i) // Calculate date in IST
+        const formattedDate = format(dateInIST, "MMM dd") // Format for display
         trendData.push({
           date: formattedDate,
           admissions: admissionsByDate[formattedDate] || 0,
@@ -227,15 +393,23 @@ export default function IPDAdminPage() {
           discharge_date,
           under_care_of_doctor,
           patient_detail (patient_id, name, number, age, gender, address, age_unit, dob, uhid),
-          bed_management (id, room_type, bed_number, bed_type, status)
-        `,
+          bed_management (id, room_type, bed_number, bed_type, status),
+          service_detail,
+          payment_detail
+        `, // Added service_detail and payment_detail for table calculations if needed, or for pre-fetching for modal
       )
 
-      if (filterStartDate) {
-        query = query.gte("admission_date", format(startOfDay(parseISO(filterStartDate)), "yyyy-MM-dd"))
+      // Get the UTC boundaries for the selected filter period
+      // This is crucial for TIMESTAMP WITHOUT TIME ZONE columns if DB is UTC
+      const startOfFilterPeriodUTC = filterStartDate ? fromIST(startOfDay(parseISO(filterStartDate))).toISOString() : null;
+      const endOfFilterPeriodUTC = filterEndDate ? fromIST(endOfDay(parseISO(filterEndDate))).toISOString() : null;
+
+
+      if (startOfFilterPeriodUTC) {
+        query = query.gte("admission_date", startOfFilterPeriodUTC);
       }
-      if (filterEndDate) {
-        query = query.lte("admission_date", format(endOfDay(parseISO(filterEndDate)), "yyyy-MM-dd"))
+      if (endOfFilterPeriodUTC) {
+        query = query.lte("admission_date", endOfFilterPeriodUTC);
       }
 
       query = query.order("admission_date", { ascending: false }) // Order by most recent admissions
@@ -271,7 +445,7 @@ export default function IPDAdminPage() {
     const lowerCaseSearchTerm = searchTerm.toLowerCase()
     return patients.filter(
       (patient) =>
-        patient.patient_detail?.name.toLowerCase().includes(lowerCaseSearchTerm) ||
+        patient.patient_detail?.name?.toLowerCase().includes(lowerCaseSearchTerm) ||
         patient.uhid?.toLowerCase().includes(lowerCaseSearchTerm) ||
         patient.patient_detail?.number?.toString().includes(lowerCaseSearchTerm) ||
         patient.ipd_id.toString().includes(lowerCaseSearchTerm),
@@ -280,19 +454,21 @@ export default function IPDAdminPage() {
 
   // Handlers for date filter buttons
   const handleFilterToday = () => {
-    const today = format(new Date(), "yyyy-MM-dd")
-    setFilterStartDate(today)
-    setFilterEndDate(today)
+    const todayIST = format(toIST(new Date()), "yyyy-MM-dd") // Get today's date in IST
+    setFilterStartDate(todayIST)
+    setFilterEndDate(todayIST)
   }
 
   const handleFilterThisWeek = () => {
-    setFilterStartDate(format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd"))
-    setFilterEndDate(format(endOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd"))
+    const nowIST = toIST(new Date());
+    setFilterStartDate(format(startOfWeek(nowIST, { weekStartsOn: 1 }), "yyyy-MM-dd"))
+    setFilterEndDate(format(endOfWeek(nowIST, { weekStartsOn: 1 }), "yyyy-MM-dd"))
   }
 
   const handleFilterThisMonth = () => {
-    setFilterStartDate(format(startOfMonth(new Date()), "yyyy-MM-dd"))
-    setFilterEndDate(format(endOfMonth(new Date()), "yyyy-MM-dd"))
+    const nowIST = toIST(new Date());
+    setFilterStartDate(format(startOfMonth(nowIST), "yyyy-MM-dd"))
+    setFilterEndDate(format(endOfMonth(nowIST), "yyyy-MM-dd"))
   }
 
   const handleClearDateFilters = () => {
@@ -302,7 +478,7 @@ export default function IPDAdminPage() {
 
   // Handles opening the patient history modal and fetching detailed data
   const handleViewPatientHistory = useCallback(async (ipdId: number) => {
-    setLoading(true)
+    setLoading(true) // Set main loading to true while fetching modal data
     try {
       const { data, error } = await supabase
         .from("ipd_registration")
@@ -328,21 +504,44 @@ export default function IPDAdminPage() {
         return
       }
 
-      // Process payment and service details to match BillingRecord structure
-      const payments = (data.payment_detail || []) as PaymentDetailItemSupabase[]
-      const services = (data.service_detail || []) as ServiceDetailItemSupabase[]
+      const payments = (data.payment_detail || []) as IPDPayment[]
+      const services = (data.service_detail || []) as IPDService[]
 
-      let totalDeposit = 0
-      let totalDiscount = 0
-      payments.forEach((p) => {
-        if (p.type === "advance" || p.type === "deposit") {
-          totalDeposit += p.amount
-        } else if (p.type === "refund") {
-          totalDeposit -= p.amount
-        } else if (p.type === "discount") {
-          totalDiscount += p.amount
+      let totalGrossBill = 0;
+      services.forEach(s => {
+        totalGrossBill += s.amount;
+      });
+
+      let totalPaidAmount = 0; // sum of 'advance', 'deposit', 'settlement' payments
+      let totalRefundedAmount = 0; // sum of 'refund' payments
+      let totalDiscountAmount = 0; // sum of 'discount' payments and 'bill_reduction' paymentType
+
+      payments.forEach(p => {
+        const amtType = p.amountType?.toLowerCase();
+        const pType = p.type?.toLowerCase();
+        const pPaymentType = p.paymentType?.toLowerCase();
+        const pTransactionType = p.transactionType?.toLowerCase();
+
+        if (
+          amtType === "advance" || amtType === "deposit" || amtType === "settlement" ||
+          pType === "advance" || pType === "deposit" || pTransactionType === "settlement"
+        ) {
+          totalPaidAmount += p.amount;
+        } else if (
+          amtType === "refund" || pType === "refund" || pTransactionType === "refund"
+        ) {
+          totalRefundedAmount += p.amount;
+        } else if (
+          amtType === "discount" || pType === "discount" || pPaymentType === "bill_reduction"
+        ) {
+          totalDiscountAmount += p.amount;
         }
-      })
+      });
+
+      // Net Balance calculation: Total Services - (Total Paid + Total Discount) + Total Refunds
+      // Refunds increase the amount due back to the hospital, or decrease the amount owed to patient
+      const netBalance = totalGrossBill - totalPaidAmount - totalDiscountAmount + totalRefundedAmount;
+
 
       const processedRecord: BillingRecord = {
         ipdId: String(data.ipd_id),
@@ -359,13 +558,17 @@ export default function IPDAdminPage() {
         relativePhone: data.relative_ph_no || null,
         relativeAddress: data.relative_address || null,
         dischargeDate: data.discharge_date,
-        totalDeposit: totalDeposit,
+        totalGrossBill: totalGrossBill, // New
+        totalPaidAmount: totalPaidAmount, // New
+        totalRefundedAmount: totalRefundedAmount, // New
+        totalDiscountAmount: totalDiscountAmount, // New
+        netBalance: netBalance, // New
         roomType: data.bed_management?.room_type || null,
         bedNumber: data.bed_management?.bed_number || null,
         bedType: data.bed_management?.bed_type || null,
         services: services,
         payments: payments,
-        discount: totalDiscount,
+        // Removed 'discount' as it's now covered by totalDiscountAmount
         admitDate: data.admission_date || null,
         admissionTime: data.admission_time || null,
         createdAt: data.created_at,
@@ -415,34 +618,31 @@ export default function IPDAdminPage() {
           visited: number
           totalCharge: number
           lastVisit: Date | null
-          items: ServiceDetailItemSupabase[]
+          items: IPDService[]
         }
       >,
     )
   }, [selectedPatientForHistory])
 
   // Calculate totals for the financial summary in the modal
+  // These now directly use the `BillingRecord`'s pre-calculated values
   const hospitalServiceTotal = useMemo(() => {
-    return (
-      selectedPatientForHistory?.services.filter((s) => s.type === "service").reduce((sum, s) => sum + s.amount, 0) || 0
-    )
-  }, [selectedPatientForHistory])
+    return selectedPatientForHistory?.totalGrossBill || 0;
+  }, [selectedPatientForHistory]);
 
   const consultantChargeTotal = useMemo(() => {
-    return (
-      selectedPatientForHistory?.services
-        .filter((s) => s.type === "doctorvisit")
-        .reduce((sum, s) => sum + s.amount, 0) || 0
-    )
-  }, [selectedPatientForHistory])
+    return selectedPatientForHistory?.services
+      .filter((s) => s.type === "doctorvisit")
+      .reduce((sum, s) => sum + s.amount, 0) || 0
+  }, [selectedPatientForHistory]);
 
   const totalBill = useMemo(() => {
-    return hospitalServiceTotal + consultantChargeTotal - (selectedPatientForHistory?.discount || 0)
-  }, [hospitalServiceTotal, consultantChargeTotal, selectedPatientForHistory])
+    return selectedPatientForHistory?.totalGrossBill || 0; // This should just be the total services amount now
+  }, [selectedPatientForHistory]);
 
   const balanceAmount = useMemo(() => {
-    return totalBill - (selectedPatientForHistory?.totalDeposit || 0)
-  }, [totalBill, selectedPatientForHistory])
+    return selectedPatientForHistory?.netBalance || 0; // This is the final calculated balance
+  }, [selectedPatientForHistory]);
 
   // Loading state for the main page
   if (loading && !selectedPatientForHistory) {
@@ -804,25 +1004,29 @@ export default function IPDAdminPage() {
                       </h3>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="bg-teal-50 rounded-lg p-4">
-                          <p className="text-sm text-teal-600">Total Bill</p>
-                          <p className="text-2xl font-bold text-teal-800">₹{totalBill.toLocaleString()}</p>
+                          <p className="text-sm text-teal-600">Total Gross Bill</p>
+                          <p className="text-2xl font-bold text-teal-800">
+                            ₹{selectedPatientForHistory.totalGrossBill.toLocaleString()}
+                          </p>
                         </div>
                         <div className="bg-cyan-50 rounded-lg p-4">
                           <p className="text-sm text-cyan-600">Total Payments Received</p>
                           <p className="text-2xl font-bold text-cyan-800">
-                            ₹{selectedPatientForHistory.totalDeposit.toLocaleString()}
+                            ₹{selectedPatientForHistory.totalPaidAmount.toLocaleString()}
                           </p>
                         </div>
-                        {balanceAmount > 0 ? (
+                        {selectedPatientForHistory.netBalance > 0 ? (
                           <div className="bg-red-50 rounded-lg p-4">
                             <p className="text-sm text-red-600">Due Amount</p>
-                            <p className="text-2xl font-bold text-red-800">₹{balanceAmount.toLocaleString()}</p>
+                            <p className="text-2xl font-bold text-red-800">
+                              ₹{selectedPatientForHistory.netBalance.toLocaleString()}
+                            </p>
                           </div>
-                        ) : balanceAmount < 0 ? (
+                        ) : selectedPatientForHistory.netBalance < 0 ? (
                           <div className="bg-blue-50 rounded-lg p-4">
                             <p className="text-sm text-blue-600">Amount to Refund</p>
                             <p className="text-2xl font-bold text-blue-800">
-                              ₹{Math.abs(balanceAmount).toLocaleString()}
+                              ₹{Math.abs(selectedPatientForHistory.netBalance).toLocaleString()}
                             </p>
                           </div>
                         ) : (
@@ -832,6 +1036,26 @@ export default function IPDAdminPage() {
                           </div>
                         )}
                       </div>
+                      {(selectedPatientForHistory.totalRefundedAmount > 0 || selectedPatientForHistory.totalDiscountAmount > 0) && (
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                           {selectedPatientForHistory.totalRefundedAmount > 0 && (
+                            <div className="bg-yellow-50 rounded-lg p-4">
+                                <p className="text-sm text-yellow-600">Total Refunds</p>
+                                <p className="text-xl font-bold text-yellow-800">
+                                    ₹{selectedPatientForHistory.totalRefundedAmount.toLocaleString()}
+                                </p>
+                            </div>
+                           )}
+                           {selectedPatientForHistory.totalDiscountAmount > 0 && (
+                            <div className="bg-purple-50 rounded-lg p-4">
+                                <p className="text-sm text-purple-600">Total Discount</p>
+                                <p className="text-xl font-bold text-purple-800">
+                                    ₹{selectedPatientForHistory.totalDiscountAmount.toLocaleString()}
+                                </p>
+                            </div>
+                           )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Services History in Modal */}
@@ -972,7 +1196,8 @@ export default function IPDAdminPage() {
                                     {payment.paymentType}
                                   </td>
                                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 capitalize">
-                                    {payment.type}
+                                    {/* Display 'type' or 'transactionType' if present */}
+                                    {payment.type || payment.transactionType || "N/A"}
                                   </td>
                                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 capitalize">
                                     {payment.through || "N/A"}

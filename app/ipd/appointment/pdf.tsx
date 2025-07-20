@@ -33,6 +33,8 @@ interface PaymentDetailItem {
   amount: number;
   createdAt: string;
   paymentType: string;
+  through: string;
+  amountType?: "advance" | "deposit" | "settlement" | "refund" | "discount"; // Added to match usage in page.tsx
 }
 
 interface ServiceDetailItem {

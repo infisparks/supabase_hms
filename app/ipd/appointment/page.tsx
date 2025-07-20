@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { User, Phone, Calendar, Bed, Eye, XCircle, AlertCircle } from "lucide-react"
+import { User, Phone, Calendar, Bed, Eye, XCircle, AlertCircle, Wallet } from "lucide-react" // Added Wallet icon
 import Layout from "@/components/global/Layout"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -63,10 +63,12 @@ interface BedData {
 
 interface PaymentDetailItem {
   date: string;
-  type: string;
+  type: string; // This 'type' refers to the old type, like "deposit"
   amount: number;
   createdAt: string;
   paymentType: string;
+  through: string; // Changed to required string to match PDF interface
+  amountType?: "advance" | "deposit" | "settlement" | "refund" | "discount"; // New: explicit type for calculation/display
 }
 
 interface ServiceDetailItem {
@@ -94,6 +96,7 @@ interface IPDFormInput {
   underCareOfDoctor: string; // Changed to store doctor name (as string)
   depositAmount: string | number | null; // Use string for input, convert to number for DB
   paymentMode: string;
+  through: string | null; // New: Added 'through' field
   bed: number | null; // Changed to number | null to match BedData.id and DB
   roomType: string;
   date: string;
@@ -121,7 +124,7 @@ const admissionTypeOptions: Option[] = [
 const paymentModeOptions: Option[] = [
   { value: "cash", label: "Cash" },
   { value: "online", label: "Online" },
-  { value: "mixed", label: "Cash + Online" },
+  { value: "mixed", label: "Cash + Online" }, // Consider if 'mixed' needs a 'through'
 ]
 
 const roomTypeOptions: Option[] = [
@@ -145,6 +148,20 @@ const ageUnitOptions: Option[] = [
   { value: "months", label: "Months" },
   { value: "days", label: "Days" },
 ]
+
+// New options for 'Through' field
+const onlineThroughOptions: Option[] = [
+  { value: "upi", label: "UPI" },
+  { value: "credit-card", label: "Credit Card" },
+  { value: "debit-card", label: "Debit Card" },
+  { value: "netbanking", label: "Net Banking" },
+  { value: "cheque", label: "Cheque" },
+]
+
+const cashThroughOptions: Option[] = [
+  { value: "cash", label: "Cash" },
+];
+
 
 const IPDAppointmentPage = () => {
   const [patients, setPatients] = useState<PatientDetail[]>([])
@@ -174,11 +191,22 @@ const IPDAppointmentPage = () => {
     underCareOfDoctor: "", // Will store doctor name as string
     depositAmount: "",
     paymentMode: "cash", // Default to Cash
+    through: "cash", // New: Default 'through' to 'cash'
     roomType: "",
     bed: null, // Initialize as null to match type
     date: new Date().toISOString().split("T")[0],
     time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }), // Default to current time (24-hour)
   })
+
+  // Effect to automatically set 'through' when paymentMode changes
+  useEffect(() => {
+    if (formData.paymentMode === "cash") {
+      setFormData((prev) => ({ ...prev, through: "cash" }));
+    } else if (formData.paymentMode === "online") {
+      setFormData((prev) => ({ ...prev, through: null })); // Clear or set a default for online
+    }
+  }, [formData.paymentMode]);
+
 
   useEffect(() => {
     fetchPatients()
@@ -363,6 +391,13 @@ const IPDAppointmentPage = () => {
       return
     }
 
+    // New validation for 'through' field when paymentMode is 'online'
+    if (formData.paymentMode === "online" && !formData.through) {
+      toast.error("Please select a 'Through' method for online payment.");
+      return;
+    }
+
+
     setIsLoading(true)
 
     try {
@@ -461,10 +496,12 @@ const IPDAppointmentPage = () => {
       if (depositAmount > 0) {
         paymentDetail.push({
           date: new Date().toISOString(),
-          type: "deposit",
+          type: "deposit", // This 'type' field is from the old structure, keeping for compatibility
           amount: depositAmount,
           createdAt: new Date().toISOString(),
           paymentType: formData.paymentMode,
+          through: formData.through || "cash", // Ensure through always has a value
+          amountType: "deposit", // Set amountType to 'deposit' by default for new appointments
         });
       }
 
@@ -488,7 +525,7 @@ const IPDAppointmentPage = () => {
           admission_source: formData.admissionSource,
           admission_type: formData.admissionType,
           under_care_of_doctor: doctorNameForDB, // Storing doctor's name
-          payment_detail: paymentDetail,
+          payment_detail: paymentDetail, // Now includes 'through' and 'amountType'
           bed_id: selectedBedIdForDb, // This is now correctly a number
           service_detail: serviceDetail, // Empty by default
           relative_name: formData.relativeName,
@@ -595,6 +632,7 @@ MedBliss Hospital
       underCareOfDoctor: "", // Reset to empty string for name
       depositAmount: "",
       paymentMode: "cash",
+      through: "cash", // Reset 'through' to cash default
       roomType: "",
       bed: null,
       date: new Date().toISOString().split("T")[0],
@@ -606,6 +644,11 @@ MedBliss Hospital
     if (!formData.name || !formData.phone) {
       toast.error("Please fill patient information first")
       return
+    }
+    // Perform validation for 'through' field before showing preview
+    if (formData.paymentMode === "online" && !formData.through) {
+      toast.error("Please select a 'Through' method for online payment before previewing.");
+      return;
     }
     setShowPreview(true)
   }
@@ -930,10 +973,40 @@ MedBliss Hospital
                   <SearchableSelect
                     options={paymentModeOptions}
                     value={formData.paymentMode}
-                    onValueChange={(value) => setFormData((prev: IPDFormInput) => ({ ...prev, paymentMode: value }))}
+                    onValueChange={(value) => {
+                      setFormData((prev: IPDFormInput) => ({ ...prev, paymentMode: value }));
+                    }}
                     placeholder="Select payment mode"
                   />
                 </div>
+
+                {/* New "Through" dropdown, conditional on paymentMode */}
+                {formData.paymentMode === "online" && (
+                  <div className="space-y-2">
+                    <Label>Through</Label>
+                    <SearchableSelect
+                      options={onlineThroughOptions}
+                      value={formData.through || ''} // Handle null for UI
+                      onValueChange={(value) => setFormData((prev: IPDFormInput) => ({ ...prev, through: value }))}
+                      placeholder="Select method"
+                    />
+                  </div>
+                )}
+
+                {/* "Through" dropdown for cash, always "Cash" and disabled */}
+                {formData.paymentMode === "cash" && (
+                  <div className="space-y-2">
+                    <Label>Through</Label>
+                    <SearchableSelect
+                      options={cashThroughOptions}
+                      value={formData.through || 'cash'} // Always show 'cash'
+                      onValueChange={() => {}} // No-op as it's disabled
+                      placeholder="Cash"
+                      disabled // Disable the dropdown
+                    />
+                  </div>
+                )}
+
 
                 <div className="space-y-2">
                   <Label htmlFor="date">Admission Date</Label>
@@ -1209,6 +1282,15 @@ MedBliss Hospital
                       </p>
                     </div>
                   )}
+                   {/* Display 'Through' only if a method is selected */}
+                   {formData.through && (
+                    <div className="bg-white p-3 rounded-md shadow-sm">
+                      <span className="font-medium text-gray-500">Through:</span>
+                      <p className="font-semibold mt-1">
+                        {(formData.paymentMode === 'cash' ? cashThroughOptions : onlineThroughOptions).find((opt) => opt.value === formData.through)?.label || formData.through}
+                      </p>
+                    </div>
+                  )}
                   <div className="bg-white p-3 rounded-md shadow-sm">
                     <span className="font-medium text-gray-500">Date:</span>
                     <p className="font-semibold mt-1">{formData.date}</p>
@@ -1265,6 +1347,8 @@ MedBliss Hospital
                     amount: Number(formData.depositAmount),
                     createdAt: new Date().toISOString(),
                     paymentType: formData.paymentMode,
+                    through: formData.through || "cash", // Ensure through always has a value
+                    amountType: "deposit", // Set amountType to 'deposit' by default for new appointments
                   }] : null,
                   serviceDetails: null, // As per your logic, this is null by default
                 }}

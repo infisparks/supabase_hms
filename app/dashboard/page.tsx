@@ -15,7 +15,7 @@ import {
   startOfMonth,
   endOfMonth,
 } from "date-fns"
-// NO date-fns-tz IMPORTS HERE - we'll do manual offset
+// NO date-fns-tz IMPORTS HERE - we'll do manual offset (or in this case, remove it)
 
 import {
   Search,
@@ -81,7 +81,7 @@ interface IPayment {
 // Patient detail structure as it would appear in the patient_detail table
 interface PatientDetailFromSupabase {
   uhid: string
-  name: string
+  name: string | null // Allowed to be null
   number: string | null // Assuming it can be null in DB
   age: number | null
   gender: string | null
@@ -91,17 +91,17 @@ interface PatientDetailFromSupabase {
 // OPD Registration (from Supabase `opd_registration` table)
 interface OPDRegistrationSupabase {
   opd_id: string // bigint in DB, but often handled as string in JS for UUIDs or large numbers
-  created_at: string // timestamp with time zone (UTC ISO string)
+  created_at: string // timestamp with time zone (ISO string)
   patient_id: number | null // bigint null in DB. Ensure this matches.
-  date: string // timestamp with time zone (UTC ISO string)
+  date: string // date (YYYY-MM-DD string as in your INSERT), OR timestamp (ISO string)
   refer_by: string | null
   "additional Notes": string | null // Exact column name from DB
   service_info: IModality[] | null // JSONB
   payment_info: IPayment | null // JSONB
   bill_no: number // smallint in DB, use number
   uhid: string // text, foreign key to patient_detail.uhid
-  // FIX: Switched to a LEFT join, so the result can be null.
-  patient_detail: PatientDetailFromSupabase[] | null
+  // This is re-added because fetchAllAppointmentsForPatient explicitly joins it
+  patient_detail?: PatientDetailFromSupabase[] | null
   "appointment_type"?: string | null
   "visit_type"?: string | null
 }
@@ -119,11 +119,13 @@ interface IPDService {
 interface IPDPayment {
   id?: string // UUID from DB or generated, optional
   amount: number
-  paymentType: "cash" | "online" | "bill_reduction"
-  type: "advance" | "refund" | "deposit" | "discount"
+  paymentType: "cash" | "online" | "bill_reduction" | string // Added string for flexibility
+  type: "advance" | "refund" | "deposit" | "settlement" | string // Added settlement and string
   date: string // ISO string
   createdAt: string // ISO string
   through?: string // Added 'through' for online/cash payments
+  transactionType?: string; // Added based on your example
+  amountType?: string; // Added based on your example
 }
 
 // IPD Registration (from Supabase `ipd_registration` table)
@@ -135,11 +137,11 @@ interface IPDRegistrationSupabase {
   under_care_of_doctor: string | null // Now storing doctor's name (string)
   payment_detail: IPDPayment[] | null // JSONB
   service_detail: IPDService[] | null // JSONB
-  created_at: string // timestamp with time zone (UTC ISO string)
+  created_at: string // timestamp with time zone (ISO string)
   bed_id: number | null
-  bed_management: { room_type: string }[] | null
-  // FIX: Switched to a LEFT join, so the result can be null.
-  patient_detail: PatientDetailFromSupabase[] | null
+  // These are re-added because fetchAllAppointmentsForPatient explicitly joins them
+  bed_management?: { room_type: string }[] | null
+  patient_detail?: PatientDetailFromSupabase[] | null
 }
 
 // OT Details (from Supabase `ot_details` table)
@@ -149,10 +151,10 @@ interface OTDetailsSupabase {
   uhid: string
   ot_type: "Major" | "Minor"
   ot_notes: string | null
-  ot_date: string // timestamp with time zone (UTC ISO string from DB, even if default is Asia/Kolkata)
-  created_at: string // timestamp with time zone (UTC ISO string from DB, even if default is Asia/Kolkata)
-  // FIX: Switched to a LEFT join, so the result can be null.
-  patient_detail: PatientDetailFromSupabase[] | null
+  ot_date: string // timestamp with time zone (ISO string)
+  created_at: string // timestamp with time zone (ISO string)
+  // This is re-added because fetchAllAppointmentsForPatient explicitly joins it
+  patient_detail?: PatientDetailFromSupabase[] | null
 }
 
 // Combined types for display in tables/modals
@@ -162,13 +164,13 @@ interface OPDAppointmentDisplay {
   patientId: string // UHID
   name: string
   phone: string
-  date: string // YYYY-MM-DD (converted to local timezone date)
-  time: string // HH:mm (converted to local timezone time)
+  date: string // YYYY-MM-DD (directly from DB or formatted)
+  time: string // HH:mm (directly from DB or formatted)
   modalities: IModality[]
   payment: IPayment
   message: string // For display, maps from additional_notes
   opd_id: string
-  created_at: string // original UTC
+  created_at: string // original ISO string from DB
   refer_by: string | null
   additional_notes: string | null // The correct column name from DB
   service_info: IModality[] | null
@@ -186,19 +188,19 @@ interface IPDAppointmentDisplay {
   name: string
   phone: string
   totalAmount: number // Calculated gross service amount
-  totalDeposit: number // Calculated net deposit (advances - refunds)
+  totalDeposit: number // Calculated net deposit (advances + deposits + settlements)
   totalRefunds: number // Calculated total refunds
   discount: number // Calculated discount
   remainingAmount: number // Calculated remaining amount
   roomType: string // From bed_management join
   ipd_id: number
   uhid: string
-  admission_date: string // YYYY-MM-DD (local date string)
-  admission_time: string | null // HH:mm (local time string)
+  admission_date: string // YYYY-MM-DD (directly from DB)
+  admission_time: string | null // HH:mm (directly from DB)
   under_care_of_doctor: string | null // Now storing doctor name
   payment_detail: IPDPayment[] | null
   service_detail: IPDService[] | null
-  created_at: string // original UTC
+  created_at: string // original ISO string from DB
   bed_id: number | null
 }
 
@@ -208,15 +210,15 @@ interface OTAppointmentDisplay {
   patientId: string // UHID
   name: string
   phone: string
-  date: string // YYYY-MM-DD (converted from ot_date in local timezone)
-  time: string // HH:mm (converted from created_at in local timezone)
+  date: string // YYYY-MM-DD (directly from ot_date)
+  time: string // HH:mm (derived from created_at or ot_date, directly from DB)
   message: string // For display, maps from ot_notes
   ipd_id: number | null // bigint null
   uhid: string
   ot_type: "Major" | "Minor"
   ot_notes: string | null
-  ot_date: string // original UTC (as string)
-  created_at: string // original UTC (as string)
+  ot_date: string // original ISO string from DB
+  created_at: string // original ISO string from DB
 }
 
 type CombinedAppointment = OPDAppointmentDisplay | IPDAppointmentDisplay | OTAppointmentDisplay
@@ -239,11 +241,7 @@ interface FilterState {
   endDate: string
 }
 
-// Define the target timezone offset for display
-// Mumbai (Asia/Kolkata) is UTC+5:30.
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000 // 5 hours 30 minutes in milliseconds
-
-// ----- Manual Timezone Conversion Helpers (TOP-LEVEL SCOPE) -----
+// ----- Helper Functions (NO CLIENT-SIDE TIMEZONE CONVERSION FOR DISPLAY) -----
 
 // Formats a number as Indian Rupee currency
 const formatCurrency = (amount: number) =>
@@ -260,73 +258,68 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
-// Converts a UTC Date object to a Date object representing the time in IST
-const toIST = (utcDate: Date): Date => {
-  return new Date(utcDate.getTime() + IST_OFFSET_MS)
-}
+// Helper to get start and end of a day for Supabase query based on a YYYY-MM-DD string
+// Since Supabase stores Asia/Kolkata, we need to ensure the query strings also reflect IST.
+const getDayRangeForQuery = (dateString: string) => {
+  // Append the IST offset to ensure Supabase correctly filters within the IST day
+  const start = `${dateString}T00:00:00+05:30`;
+  const end = `${dateString}T23:59:59+05:30`;
+  return { start, end };
+};
 
-// Converts an IST Date object to a Date object representing the time in UTC
-const fromIST = (istDate: Date): Date => {
-  return new Date(istDate.getTime() - IST_OFFSET_MS)
-}
-
-// Helper to get start and end of a day in UTC, based on a local IST date string (YYYY-MM-DD)
-// This will be used for Supabase queries
-const getDayRangeUtcFromLocal = (localDateString: string) => {
-  const localDate = parseISO(localDateString) // Parse as local date without timezone info
-  const startOfLocalDay = startOfDay(localDate)
-  const endOfLocalDay = endOfDay(localDate)
+const getTodayDateRange = () => {
+  // Use Intl.DateTimeFormat to get the current date string in Asia/Kolkata timezone
+  const now = new Date();
+  const istFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const istDateString = istFormatter.format(now); // This gives 'YYYY-MM-DD' in IST
 
   return {
-    start: fromIST(startOfLocalDay).toISOString(), // Convert local start of day to UTC ISO string
-    end: fromIST(endOfLocalDay).toISOString(), // Convert local end of day to UTC ISO string
-  }
-}
+    ...getDayRangeForQuery(istDateString),
+    displayDate: istDateString, // For display purposes
+  };
+};
 
 const getThisWeekRange = () => {
-  const now = new Date() // Current system time (UTC)
-  const nowInIST = toIST(now) // Convert current UTC time to IST Date object
-
-  const startOfWeekInIST = startOfWeek(nowInIST, { weekStartsOn: 1 }) // Monday in IST
-  const endOfWeekInIST = endOfWeek(nowInIST, { weekStartsOn: 1 }) // Sunday in IST
-
-  return {
-    start: fromIST(startOfWeekInIST).toISOString(), // Convert IST start of week to UTC ISO string
-    end: fromIST(endOfWeekInIST).toISOString(), // Convert IST end of week to UTC ISO string
-  }
-}
-
-// Replace getTodayDateRange with a robust IST calculation using Intl.DateTimeFormat
-const getTodayDateRange = () => {
-  // Get the current date in Asia/Kolkata reliably
   const now = new Date();
-  // Use Intl.DateTimeFormat to get the date in IST
-  const istFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
-  const parts = istFormatter.formatToParts(now);
-  const year = parts.find(p => p.type === 'year')?.value;
-  const month = parts.find(p => p.type === 'month')?.value;
-  const day = parts.find(p => p.type === 'day')?.value;
-  const istDateString = `${year}-${month}-${day}`;
-  // Use this IST date string to get the UTC range for the whole IST day
+  // Get the current date in IST as a Date object that date-fns can work with
+  const istNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+
+  const startOfWeekIST = startOfWeek(istNow, { weekStartsOn: 1 }); // Monday in IST
+  const endOfWeekIST = endOfWeek(istNow, { weekStartsOn: 1 }); // Sunday in IST
+
+  // Format with explicit IST offset for Supabase query
+  const start = format(startOfWeekIST, "yyyy-MM-dd'T'00:00:00+05:30");
+  const end = format(endOfWeekIST, "yyyy-MM-dd'T'23:59:59+05:30");
+
   return {
-    ...getDayRangeUtcFromLocal(istDateString),
-    istDateString,
+    start,
+    end,
+    displayStart: format(startOfWeekIST, "yyyy-MM-dd"), // For display
+    displayEnd: format(endOfWeekIST, "yyyy-MM-dd"),     // For display
   };
-}
+};
 
 const getMonthRange = (monthYear: string) => {
-  const [year, month] = monthYear.split("-").map(Number)
-  // Create a Date object representing the first day of the month in IST
-  // We construct it in local system time, then convert to IST, then to UTC for query
-  const firstDayOfMonthLocal = new Date(year, month - 1, 1)
-  const firstDayOfMonthIST = toIST(firstDayOfMonthLocal)
-  const lastDayOfMonthIST = endOfMonth(firstDayOfMonthIST) // endOfMonth correctly handles month-end in IST
+  const [year, month] = monthYear.split("-").map(Number);
+  // Create a Date object for the first day of the month.
+  // We use the year and month to construct a Date, which date-fns will handle.
+  // The crucial part is to ensure the formatted string for Supabase carries the IST offset.
+  const firstDayOfMonth = new Date(year, month - 1, 1);
+  const startOfPeriod = startOfMonth(firstDayOfMonth);
+  const endOfPeriod = endOfMonth(firstDayOfMonth);
+
+  // Format with explicit IST offset for Supabase query
+  const start = format(startOfPeriod, "yyyy-MM-dd'T'00:00:00+05:30");
+  const end = format(endOfPeriod, "yyyy-MM-dd'T'23:59:59+05:30");
 
   return {
-    start: fromIST(startOfDay(firstDayOfMonthIST)).toISOString(),
-    end: fromIST(endOfDay(lastDayOfMonthIST)).toISOString(),
-  }
-}
+    start,
+    end,
+    displayStart: format(startOfPeriod, "yyyy-MM-dd"), // For display
+    displayEnd: format(endOfPeriod, "yyyy-MM-dd"),     // For display
+  };
+};
+
 
 // --- Helper functions for patient and room fetching ---
 async function fetchPatientDetailByUhid(uhid: string) {
@@ -361,7 +354,7 @@ const DashboardPage: React.FC = () => {
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: "",
     filterType: "today", // Set default to 'today'
-    selectedMonth: format(toIST(new Date()), "yyyy-MM"), // Default month in Mumbai timezone
+    selectedMonth: format(new Date(), "yyyy-MM"), // Default month for current date
     startDate: "",
     endDate: "",
   })
@@ -384,52 +377,47 @@ const DashboardPage: React.FC = () => {
 
   // Compute current date range for the dashboard display and the query
   const currentDateRange = useMemo(() => {
-    let rangeUtc: { start: string; end: string; istDateString?: string }
-    let displayStart: string
-    let displayEnd: string
+    let range: { start: string; end: string; displayStart: string; displayEnd: string }
 
     switch (filters.filterType) {
       case "today": {
         const todayRange = getTodayDateRange();
-        rangeUtc = todayRange;
-        displayStart = todayRange.istDateString;
-        displayEnd = todayRange.istDateString;
+        range = {
+          start: todayRange.start,
+          end: todayRange.end,
+          displayStart: todayRange.displayDate,
+          displayEnd: todayRange.displayDate,
+        };
         break;
       }
       case "month": {
-        rangeUtc = getMonthRange(filters.selectedMonth)
-        const monthStartIST = toIST(parseISO(rangeUtc.start)) // Convert UTC start to IST for display
-        const monthEndIST = toIST(parseISO(rangeUtc.end)) // Convert UTC end to IST for display
-        displayStart = format(monthStartIST, "yyyy-MM-dd")
-        displayEnd = format(monthEndIST, "yyyy-MM-dd")
+        range = getMonthRange(filters.selectedMonth);
         break;
       }
       case "dateRange": {
         // For custom date range, the inputs (filters.startDate/endDate) are already YYYY-MM-DD local strings.
-        rangeUtc = getDayRangeUtcFromLocal(filters.startDate) // Start of start date in UTC
-        const endRange = getDayRangeUtcFromLocal(filters.endDate) // End of end date in UTC
-        rangeUtc.end = endRange.end // Update the end of the range to cover the whole end day
-
-        displayStart = filters.startDate
-        displayEnd = filters.endDate
+        const startRange = getDayRangeForQuery(filters.startDate);
+        const endRange = getDayRangeForQuery(filters.endDate);
+        range = {
+          start: startRange.start,
+          end: endRange.end,
+          displayStart: filters.startDate,
+          displayEnd: filters.endDate,
+        };
         break;
       }
       case "week":
       default: {
-        rangeUtc = getThisWeekRange()
-        const weekStartIST = toIST(parseISO(rangeUtc.start)) // Convert UTC start to IST for display
-        const weekEndIST = toIST(parseISO(rangeUtc.end)) // Convert UTC end to IST for display
-        displayStart = format(weekStartIST, "yyyy-MM-dd")
-        displayEnd = format(weekEndIST, "yyyy-MM-dd")
+        range = getThisWeekRange();
         break;
       }
     }
 
     return {
-      startUtc: rangeUtc.start, // UTC ISO string for query
-      endUtc: rangeUtc.end, // UTC ISO string for query
-      displayStart, // For display in filters
-      displayEnd, // For display in filters
+      start: range.start, // ISO string with offset for query
+      end: range.end,   // ISO string with offset for query
+      displayStart: range.displayStart, // For display in filters
+      displayEnd: range.displayEnd, // For display in filters
     }
   }, [filters])
 
@@ -526,8 +514,8 @@ const DashboardPage: React.FC = () => {
 
           const mappedPatients: PatientInfo[] = Object.values(mergedResults).map((p) => ({
             uhid: p.uhid,
-            name: p.name || "Unknown",
-            phone: p.number || "N/A", // Changed from String(p.number) assuming it's already string or null
+            name: p.name || "Unknown", // Use 'Unknown' for null names
+            phone: p.number || "N/A", // Use 'N/A' for null numbers
             age: p.age || null,
             address: p.address || null,
             gender: p.gender || null,
@@ -547,33 +535,38 @@ const DashboardPage: React.FC = () => {
       }
 
       // --- Date filter mode (when no search query) ---
-      const { startUtc, endUtc } = currentDateRange
-      if (!startUtc || !endUtc) {
+      const { start, end } = currentDateRange
+      if (!start || !end) {
         setIsLoading(false)
         if (isRefresh) setRefreshing(false)
         return
       }
 
       try {
-        // Determine which date column to filter on based on filters.filterType
-        // For 'today', 'week', 'month' filters, it's generally good to filter by created_at for a dashboard overview.
-        // If the intention for 'today' was specifically `opd_registration.date` (appointment date),
-        // the original code's `useDateField` logic was correctly trying to switch.
-        // For simplicity and general dashboard overview, let's keep `created_at` for all filters,
-        // or explicitly handle `date` for OPD only if needed.
-        // Sticking to original logic where 'today' used `date` column and others `created_at`
+        // Use the appropriate date column for filtering
         const dateColumnForOPD = filters.filterType === 'today' ? 'date' : 'created_at';
         const dateColumnForIPD = filters.filterType === 'today' ? 'admission_date' : 'created_at';
         const dateColumnForOT = filters.filterType === 'today' ? 'ot_date' : 'created_at';
 
+        // For today filter, we need to use simple date strings for date columns
+        const todayDateString = filters.filterType === 'today' ? currentDateRange.displayStart : null;
+        
+        // Debug logging for today filter
+        if (filters.filterType === 'today') {
+          console.log('Today filter active, using date string:', todayDateString);
+          console.log('OT query parameters:', {
+            todayStart: `${todayDateString}T00:00:00`,
+            todayEnd: `${todayDateString}T23:59:59`
+          });
+        }
 
         // Fetch OPD data
-        const { data: opdData, error: opdError } = await supabase
+        let opdQuery = supabase
           .from("opd_registration")
           .select(`
             opd_id,
             created_at,
-            patient_id, 
+            patient_id,
             date,
             refer_by,
             "additional Notes",
@@ -581,17 +574,33 @@ const DashboardPage: React.FC = () => {
             payment_info,
             bill_no,
             uhid
-          `)
-          .gte(dateColumnForOPD, startUtc)
-          .lte(dateColumnForOPD, endUtc)
+          `);
+
+        // For today filter, use simple date comparison for date
+        if (filters.filterType === 'today') {
+          opdQuery = opdQuery.eq('date', todayDateString);
+        } else {
+          opdQuery = opdQuery.gte(dateColumnForOPD, start).lte(dateColumnForOPD, end);
+        }
+
+        const { data: opdData, error: opdError } = await opdQuery;
 
         if (opdError) throw opdError
-        // Fetch patient details for each OPD record
+        // Fetch patient details for each OPD record dynamically
         const mappedOpd: OPDAppointmentDisplay[] = await Promise.all(
           ((opdData as OPDRegistrationSupabase[]) || []).map(async (appt) => {
-            let patientDetail = await fetchPatientDetailByUhid(appt.uhid);
-            const createdAtIST = toIST(parseISO(appt.created_at))
-            const opdDateIST = toIST(parseISO(appt.date))
+            const patientDetail = await fetchPatientDetailByUhid(appt.uhid); // Fetch patient details here
+            // Handle date parsing - it might be a simple date string or ISO timestamp
+            let opdDate: Date;
+            try {
+              opdDate = parseISO(appt.date);
+            } catch (error) {
+              // If parsing fails, assume it's a simple date string and add time
+              opdDate = parseISO(`${appt.date}T00:00:00`);
+            }
+            
+            const createdAtDate = parseISO(appt.created_at); // Parse as is
+
             return {
               ...appt,
               type: "OPD",
@@ -599,8 +608,8 @@ const DashboardPage: React.FC = () => {
               patientId: patientDetail?.uhid || appt.uhid || "N/A",
               name: patientDetail?.name || "Unknown",
               phone: patientDetail?.number ? String(patientDetail.number) : "N/A",
-              date: format(opdDateIST, "yyyy-MM-dd"),
-              time: format(createdAtIST, "HH:mm"),
+              date: format(opdDate, "yyyy-MM-dd"), // Directly format
+              time: format(createdAtDate, "HH:mm"), // Directly format
               modalities: (appt.service_info as IModality[]) || [],
               payment: (appt.payment_info as IPayment) || {
                 cashAmount: 0,
@@ -623,7 +632,7 @@ const DashboardPage: React.FC = () => {
         setOpdAppointments(mappedOpd)
 
         // Fetch IPD data
-        const { data: ipdData, error: ipdError } = await supabase
+        let ipdQuery = supabase
           .from("ipd_registration")
           .select(`
             ipd_id,
@@ -635,31 +644,59 @@ const DashboardPage: React.FC = () => {
             service_detail,
             created_at,
             bed_id
-          `)
-          .gte(dateColumnForIPD, startUtc)
-          .lte(dateColumnForIPD, endUtc)
+          `);
+
+        // For today filter, use simple date comparison for admission_date
+        if (filters.filterType === 'today') {
+          ipdQuery = ipdQuery.eq('admission_date', todayDateString);
+        } else {
+          ipdQuery = ipdQuery.gte(dateColumnForIPD, start).lte(dateColumnForIPD, end);
+        }
+
+        const { data: ipdData, error: ipdError } = await ipdQuery;
 
         if (ipdError) throw ipdError
+        
+        // Debug logging for IPD results
+        if (filters.filterType === 'today') {
+          console.log('IPD query results for today:', ipdData?.length || 0, 'records');
+          console.log('IPD data:', ipdData);
+        }
         const mappedIpd: IPDAppointmentDisplay[] = await Promise.all(
           ((ipdData as IPDRegistrationSupabase[]) || []).map(async (ipdRecord) => {
             const payments = (ipdRecord.payment_detail || []) as IPDPayment[]
-            const services = (ipdRecord.service_detail || []) as IPDService[]
             let totalDeposit = 0
             let totalRefunds = 0
             let totalDiscount = 0
+
             payments.forEach((p) => {
-              if (p.type === "advance" || p.type === "deposit") {
-                totalDeposit += p.amount
-              } else if (p.type === "refund") {
-                totalRefunds += p.amount
-              } else if (p.type === "discount" || p.type === "bill_reduction") {
-                totalDiscount += p.amount
+              const amtType = p.amountType?.toLowerCase();
+              const pType = p.type?.toLowerCase();
+              const pPaymentType = p.paymentType?.toLowerCase();
+              const pTransactionType = p.transactionType?.toLowerCase();
+
+              if (
+                amtType === "advance" || amtType === "deposit" || amtType === "settlement" ||
+                pType === "advance" || pType === "deposit" || pTransactionType === "settlement"
+              ) {
+                totalDeposit += p.amount;
+              } else if (
+                amtType === "refund" || pType === "refund" || pTransactionType === "refund"
+              ) {
+                totalRefunds += p.amount;
+              } else if (
+                amtType === "discount" || pType === "discount" || pPaymentType === "bill_reduction"
+              ) {
+                totalDiscount += p.amount;
               }
-            })
+            });
+
+            const services = (ipdRecord.service_detail || []) as IPDService[]
             const totalServiceAmount = services.reduce((sum, s) => sum + s.amount, 0)
-            const remaining = totalServiceAmount - totalDiscount - totalDeposit + totalRefunds
-            let patientDetail = await fetchPatientDetailByUhid(ipdRecord.uhid);
-            let roomType = await fetchRoomTypeByBedId(ipdRecord.bed_id);
+            const remaining = totalServiceAmount - totalDeposit - totalDiscount + totalRefunds;
+
+            const patientDetail = await fetchPatientDetailByUhid(ipdRecord.uhid); // Fetch patient details here
+            const roomType = await fetchRoomTypeByBedId(ipdRecord.bed_id); // Fetch room type here
             return {
               ...ipdRecord,
               type: "IPD",
@@ -673,28 +710,56 @@ const DashboardPage: React.FC = () => {
               discount: totalDiscount,
               remainingAmount: remaining,
               roomType: roomType || "N/A",
-              admission_date: ipdRecord.admission_date,
-              admission_time: ipdRecord.admission_time,
+              admission_date: ipdRecord.admission_date, // Directly use from DB
+              admission_time: ipdRecord.admission_time, // Directly use from DB
             }
           })
         );
         setIpdAppointments(mappedIpd)
 
         // Fetch OT data
-        const { data: otData, error: otError } = await supabase
+        let otQuery = supabase
           .from("ot_details")
           .select(`
             id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at
-          `)
-          .gte(dateColumnForOT, startUtc)
-          .lte(dateColumnForOT, endUtc)
+          `);
+
+        // For today filter, use date range comparison for ot_date
+        if (filters.filterType === 'today') {
+          // Try multiple date formats for ot_date
+          // Since ot_date might be stored as timestamp with timezone
+          const todayStart = `${todayDateString}T00:00:00+05:30`;
+          const todayEnd = `${todayDateString}T23:59:59+05:30`;
+          otQuery = otQuery.gte('ot_date', todayStart).lte('ot_date', todayEnd);
+        } else {
+          otQuery = otQuery.gte(dateColumnForOT, start).lte(dateColumnForOT, end);
+        }
+
+        const { data: otData, error: otError } = await otQuery;
 
         if (otError) throw otError
+        
+        // Debug logging for OT results
+        if (filters.filterType === 'today') {
+          console.log('OT query results for today:', otData?.length || 0, 'records');
+          console.log('OT data:', otData);
+          if (otData && otData.length > 0) {
+            console.log('OT dates in database:', otData.map(ot => ot.ot_date));
+          }
+        }
         const mappedOt: OTAppointmentDisplay[] = await Promise.all(
           ((otData as OTDetailsSupabase[]) || []).map(async (otRecord) => {
-            const otDateIST = toIST(parseISO(otRecord.ot_date)) // ot_date is also timestamp with timezone
-            const createdAtIST = toIST(parseISO(otRecord.created_at))
-            let patientDetail = await fetchPatientDetailByUhid(otRecord.uhid);
+            // Handle ot_date parsing - it might be a simple date string or ISO timestamp
+            let otDate: Date;
+            try {
+              otDate = parseISO(otRecord.ot_date);
+            } catch (error) {
+              // If parsing fails, assume it's a simple date string and add time
+              otDate = parseISO(`${otRecord.ot_date}T00:00:00`);
+            }
+            
+            const createdAtDate = parseISO(otRecord.created_at); // Parse as is
+            const patientDetail = await fetchPatientDetailByUhid(otRecord.uhid); // Fetch patient details here
             return {
               ...otRecord,
               type: "OT",
@@ -702,8 +767,8 @@ const DashboardPage: React.FC = () => {
               patientId: patientDetail?.uhid || otRecord.uhid || "N/A",
               name: patientDetail?.name || "Unknown",
               phone: patientDetail?.number ? String(patientDetail.number) : "N/A",
-              date: format(otDateIST, "yyyy-MM-dd"), // Use converted ot_date
-              time: format(createdAtIST, "HH:mm"), // Use converted created_at for time
+              date: format(otDate, "yyyy-MM-dd"), // Directly format
+              time: format(createdAtDate, "HH:mm"), // Directly format
               message: otRecord.ot_notes || "No notes",
             }
           })
@@ -727,17 +792,32 @@ const DashboardPage: React.FC = () => {
   // Statistics
   const statistics = useMemo(() => {
     const totalOpdAmt = opdAppointments.reduce((sum, a) => sum + (a.payment?.totalPaid || 0), 0)
-    const totalIpdDep = ipdAppointments.reduce((sum, a) => sum + a.totalDeposit, 0)
-    const totalIpdRef = ipdAppointments.reduce((sum, a) => sum + a.totalRefunds, 0)
+    // Recalculate IPD totals based on the new logic
+    const totalIpdDeposits = ipdAppointments.reduce((sum, a) => sum + a.totalDeposit, 0);
+    const totalIpdRefunds = ipdAppointments.reduce((sum, a) => sum + a.totalRefunds, 0);
+    // Net contribution from IPD to total revenue (Deposits - Refunds)
+    const netIpdContribution = totalIpdDeposits - totalIpdRefunds;
+
 
     const opdCash = opdAppointments.reduce((sum, a) => sum + (a.payment?.cashAmount || 0), 0)
     const opdOnline = opdAppointments.reduce((sum, a) => sum + (a.payment?.onlineAmount || 0), 0)
 
+    // Calculate IPD cash and online based on contributions TO the hospital
     const ipdCash = ipdAppointments.reduce(
       (sum, a) =>
         sum +
         (a.payment_detail || [])
-          .filter((p) => p.paymentType === "cash" && (p.type === "advance" || p.type === "deposit"))
+          .filter((p) => {
+            const amtType = p.amountType?.toLowerCase();
+            const pType = p.type?.toLowerCase();
+            const pPaymentType = p.paymentType?.toLowerCase();
+            const pTransactionType = p.transactionType?.toLowerCase();
+            return (
+              p.paymentType?.toLowerCase() === "cash" &&
+              (amtType === "advance" || amtType === "deposit" || amtType === "settlement" ||
+                pType === "advance" || pType === "deposit" || pTransactionType === "settlement")
+            );
+          })
           .reduce((s, p) => s + Number(p.amount), 0),
       0,
     )
@@ -745,7 +825,17 @@ const DashboardPage: React.FC = () => {
       (sum, a) =>
         sum +
         (a.payment_detail || [])
-          .filter((p) => p.paymentType === "online" && (p.type === "advance" || p.type === "deposit"))
+          .filter((p) => {
+            const amtType = p.amountType?.toLowerCase();
+            const pType = p.type?.toLowerCase();
+            const pPaymentType = p.paymentType?.toLowerCase();
+            const pTransactionType = p.transactionType?.toLowerCase();
+            return (
+              p.paymentType?.toLowerCase() === "online" &&
+              (amtType === "advance" || amtType === "deposit" || amtType === "settlement" ||
+                pType === "advance" || pType === "deposit" || pTransactionType === "settlement")
+            );
+          })
           .reduce((s, p) => s + Number(p.amount), 0),
       0,
     )
@@ -754,14 +844,14 @@ const DashboardPage: React.FC = () => {
       totalOpdCount: opdAppointments.length,
       totalOpdAmount: totalOpdAmt,
       totalIpdCount: ipdAppointments.length,
-      totalIpdAmount: totalIpdDep,
-      overallIpdRefunds: totalIpdRef,
+      totalIpdAmount: totalIpdDeposits, // This is now total deposits/advances/settlements
+      overallIpdRefunds: totalIpdRefunds,
       totalOtCount: otAppointments.length, // This already gives the count of OT procedures
       opdCash,
       opdOnline,
       ipdCash,
       ipdOnline,
-      totalRevenue: totalOpdAmt + totalIpdDep,
+      totalRevenue: totalOpdAmt + netIpdContribution, // Total revenue includes net IPD contribution
     }
   }, [opdAppointments, ipdAppointments, otAppointments])
 
@@ -775,11 +865,8 @@ const DashboardPage: React.FC = () => {
 
     // Sorting by date (most recent first)
     list.sort((a, b) => {
-      // Reconstruct full date-time objects in local context for sorting
-      // Assuming date fields (admission_date, date, ot_date) are YYYY-MM-DD local dates
-      // And time fields (admission_time, time) are HH:mm local times
-      // We combine them and convert to IST for consistent comparison
-      const getDateAndTimeInIST = (app: CombinedAppointment) => {
+      // Parse dates directly from string as they are assumed to be in the correct timezone (IST)
+      const getDateAndTime = (app: CombinedAppointment) => {
         let dateStr: string
         let timeStr: string | null
 
@@ -787,20 +874,20 @@ const DashboardPage: React.FC = () => {
           dateStr = app.admission_date
           timeStr = app.admission_time
         } else if (app.type === "OT") {
-          dateStr = app.date // Use the converted `date` (ot_date in IST)
-          timeStr = app.time // Use the converted `time` (created_at time in IST)
+          dateStr = app.date // Use the already formatted `date` (ot_date in IST)
+          timeStr = app.time // Use the already formatted `time` (created_at time in IST)
         } else {
           // OPD
           dateStr = app.date
           timeStr = app.time // OPD time is derived from created_at
         }
 
-        // Parse the combined local date and time, then convert to IST Date object for comparison
-        return toIST(parseISO(`${dateStr}T${timeStr || "00:00"}`))
+        // Combine date and time and parse as an ISO string directly
+        return parseISO(`${dateStr}T${timeStr || "00:00"}`);
       }
 
-      const dateTimeA = getDateAndTimeInIST(a)
-      const dateTimeB = getDateAndTimeInIST(b)
+      const dateTimeA = getDateAndTime(a)
+      const dateTimeB = getDateAndTime(b)
 
       return dateTimeB.getTime() - dateTimeA.getTime()
     })
@@ -837,23 +924,23 @@ const DashboardPage: React.FC = () => {
 
   // Last 3 days chart
   const chartData = useMemo(() => {
-    // Get dates in Mumbai timezone for chart labels and data aggregation
-    const todayISTDate = toIST(new Date())
-    const today = format(todayISTDate, "yyyy-MM-dd")
-    const yesterday = format(addDays(todayISTDate, -1), "yyyy-MM-dd")
-    const dayBeforeYesterday = format(addDays(todayISTDate, -2), "yyyy-MM-dd")
+    // Get dates for chart labels and data aggregation, assuming direct use of current system date for 'today'
+    // and that the fetched data's 'created_at' can be directly parsed for comparison.
+    const today = format(new Date(), "yyyy-MM-dd") // Local system's today
+    const yesterday = format(addDays(new Date(), -1), "yyyy-MM-dd")
+    const dayBeforeYesterday = format(addDays(new Date(), -2), "yyyy-MM-dd")
 
     const opdCounts: Record<string, number> = { [dayBeforeYesterday]: 0, [yesterday]: 0, [today]: 0 }
     opdAppointments.forEach((a) => {
-      // Aggregate by the converted date (created_at from Supabase is UTC)
-      const dateKey = format(toIST(parseISO(a.created_at)), "yyyy-MM-dd")
+      // Aggregate by the `created_at` date directly (assumed to be in IST if DB stores that way)
+      const dateKey = format(parseISO(a.created_at), "yyyy-MM-dd")
       if (opdCounts[dateKey] !== undefined) opdCounts[dateKey]++
     })
 
     const ipdCounts: Record<string, number> = { [dayBeforeYesterday]: 0, [yesterday]: 0, [today]: 0 }
     ipdAppointments.forEach((a) => {
-      // Aggregate by the converted date (created_at from Supabase is UTC)
-      const dateKey = format(toIST(parseISO(a.created_at)), "yyyy-MM-dd")
+      // Aggregate by the `created_at` date directly (assumed to be in IST if DB stores that way)
+      const dateKey = format(parseISO(a.created_at), "yyyy-MM-dd")
       if (ipdCounts[dateKey] !== undefined) ipdCounts[dateKey]++
     })
 
@@ -877,17 +964,17 @@ const DashboardPage: React.FC = () => {
   // Handlers
   const handleDateRangeChange = (startStr: string, endStr: string) => {
     if (startStr && endStr) {
-      const startDateLocal = parseISO(startStr)
-      const endDateLocal = parseISO(endStr)
+      const startDate = parseISO(startStr)
+      const endDate = parseISO(endStr)
 
-      const diff = differenceInDays(endDateLocal, startDateLocal)
+      const diff = differenceInDays(endDate, startDate)
       if (diff > 30) {
         toast.error("Date range cannot exceed 30 days")
-        const maxEndLocal = addDays(startDateLocal, 30)
+        const maxEnd = addDays(startDate, 30)
         setFilters((p) => ({
           ...p,
           startDate: startStr,
-          endDate: format(maxEndLocal, "yyyy-MM-dd"),
+          endDate: format(maxEnd, "yyyy-MM-dd"),
           filterType: "dateRange",
         }))
       } else {
@@ -910,7 +997,7 @@ const DashboardPage: React.FC = () => {
         filterType: "today",
         startDate: "",
         endDate: "",
-        selectedMonth: format(toIST(new Date()), "yyyy-MM"),
+        selectedMonth: format(new Date(), "yyyy-MM"),
         searchQuery: "",
       }))
     } else if (upd.filterType === "week") {
@@ -919,7 +1006,7 @@ const DashboardPage: React.FC = () => {
         filterType: "week",
         startDate: "",
         endDate: "",
-        selectedMonth: format(toIST(new Date()), "yyyy-MM"),
+        selectedMonth: format(new Date(), "yyyy-MM"),
         searchQuery: "",
       }))
     } else if (upd.filterType === "month") {
@@ -928,7 +1015,7 @@ const DashboardPage: React.FC = () => {
         filterType: "month",
         startDate: "",
         endDate: "",
-        selectedMonth: upd.selectedMonth || format(toIST(new Date()), "yyyy-MM"),
+        selectedMonth: upd.selectedMonth || format(new Date(), "yyyy-MM"),
         searchQuery: "",
       }))
     } else {
@@ -940,7 +1027,7 @@ const DashboardPage: React.FC = () => {
     setFilters({
       searchQuery: "",
       filterType: "today",
-      selectedMonth: format(toIST(new Date()), "yyyy-MM"),
+      selectedMonth: format(new Date(), "yyyy-MM"),
       startDate: "",
       endDate: "",
     })
@@ -961,26 +1048,43 @@ const DashboardPage: React.FC = () => {
   // New: Fetch all appointments for a specific patient (for patient search modal)
   const fetchAllAppointmentsForPatient = useCallback(
     async (uhid: string) => {
+      console.log('Fetching appointments for UHID:', uhid);
       setPatientAppointmentsLoading(true)
       const allPatientApps: CombinedAppointment[] = []
 
       try {
+        // Use the same approach as main dashboard queries - fetch patient details separately
         const { data: opdData, error: opdError } = await supabase
           .from("opd_registration")
           .select(
             `
-              opd_id, created_at, date, refer_by, "additional Notes", service_info, payment_info, bill_no, uhid, patient_id,
-              patient_detail(uhid, name, number, age, gender, address)
+              opd_id, created_at, date, refer_by, "additional Notes", service_info, payment_info, bill_no, uhid, patient_id
             `,
           )
           .eq("uhid", uhid)
           .order("created_at", { ascending: false })
 
         if (opdError) throw opdError
-        const mappedOpd: OPDAppointmentDisplay[] = ((opdData as OPDRegistrationSupabase[]) || []).map((appt) => {
-          const createdAtIST = toIST(parseISO(appt.created_at))
-          const opdDateIST = toIST(parseISO(appt.date))
-          const patientDetail = appt.patient_detail?.[0]
+        
+        // Debug logging for OPD data
+        console.log('OPD data:', opdData);
+        
+        const mappedOpd: OPDAppointmentDisplay[] = await Promise.all(((opdData as OPDRegistrationSupabase[]) || []).map(async (appt) => {
+          // Fetch patient details separately like in main dashboard
+          const patientDetail = await fetchPatientDetailByUhid(appt.uhid);
+          
+          // Direct use of DB dates/times
+          const createdAtDate = parseISO(appt.created_at);
+          const opdDate = parseISO(appt.date);
+          
+          // Debug logging for each appointment
+          console.log('OPD appointment patient detail:', {
+            uhid: appt.uhid,
+            patientDetail: patientDetail,
+            name: patientDetail?.name || "Unknown",
+            phone: patientDetail?.number || "N/A"
+          });
+          
           return {
             ...appt,
             type: "OPD",
@@ -988,8 +1092,8 @@ const DashboardPage: React.FC = () => {
             patientId: patientDetail?.uhid || appt.uhid || "N/A",
             name: patientDetail?.name || "Unknown",
             phone: patientDetail?.number ? String(patientDetail.number) : "N/A",
-            date: format(opdDateIST, "yyyy-MM-dd"),
-            time: format(createdAtIST, "HH:mm"),
+            date: format(opdDate, "yyyy-MM-dd"),
+            time: format(createdAtDate, "HH:mm"),
             modalities: (appt.service_info as IModality[]) || [],
             payment: (appt.payment_info as IPayment) || {
               cashAmount: 0,
@@ -1007,44 +1111,59 @@ const DashboardPage: React.FC = () => {
             appointment_type: (appt as any).appointment_type,
             visit_type: (appt as any).visit_type,
           }
-        })
+        }))
         allPatientApps.push(...mappedOpd)
 
         const { data: ipdData, error: ipdError } = await supabase
           .from("ipd_registration")
           .select(
             `
-              ipd_id, uhid, admission_date, admission_time, under_care_of_doctor, payment_detail, service_detail, created_at, bed_id,
-              bed_management(room_type),
-              patient_detail(uhid, name, number, age, gender, address)
+              ipd_id, uhid, admission_date, admission_time, under_care_of_doctor, payment_detail, service_detail, created_at, bed_id
             `,
           )
           .eq("uhid", uhid)
           .order("created_at", { ascending: false })
 
         if (ipdError) throw ipdError
-        const mappedIpd: IPDAppointmentDisplay[] = ((ipdData as IPDRegistrationSupabase[]) || []).map((ipdRecord) => {
+        
+        // Debug logging for IPD data
+        console.log('IPD data:', ipdData);
+        
+        const mappedIpd: IPDAppointmentDisplay[] = await Promise.all(((ipdData as IPDRegistrationSupabase[]) || []).map(async (ipdRecord) => {
           const payments = (ipdRecord.payment_detail || []) as IPDPayment[]
-          const services = (ipdRecord.service_detail || []) as IPDService[]
-
           let totalDeposit = 0
           let totalRefunds = 0
           let totalDiscount = 0
 
           payments.forEach((p) => {
-            if (p.type === "advance" || p.type === "deposit") {
-              totalDeposit += p.amount
-            } else if (p.type === "refund") {
-              totalRefunds += p.amount
-            } else if (p.type === "discount" || p.type === "bill_reduction") {
-              totalDiscount += p.amount
+            const pType = p.type?.toLowerCase();
+            const pPaymentType = p.paymentType?.toLowerCase();
+            const pTransactionType = p.transactionType?.toLowerCase();
+
+            if (pType === "advance" || pType === "deposit" || pTransactionType === "settlement") {
+              totalDeposit += p.amount;
+            } else if (pType === "refund" || pTransactionType === "refund") {
+              totalRefunds += p.amount;
+            } else if (pType === "discount" || pPaymentType === "bill_reduction") {
+              totalDiscount += p.amount;
             }
           })
 
+          const services = (ipdRecord.service_detail || []) as IPDService[]
           const totalServiceAmount = services.reduce((sum, s) => sum + s.amount, 0)
-          const remaining = totalServiceAmount - totalDiscount - totalDeposit + totalRefunds
-          const patientDetail = ipdRecord.patient_detail?.[0]
-          const bedManagement = ipdRecord.bed_management?.[0]
+          const remaining = totalServiceAmount - totalDeposit - totalDiscount + totalRefunds
+          
+          // Fetch patient details and room type separately like in main dashboard
+          const patientDetail = await fetchPatientDetailByUhid(ipdRecord.uhid);
+          const roomType = await fetchRoomTypeByBedId(ipdRecord.bed_id);
+          
+          // Debug logging for each IPD appointment
+          console.log('IPD appointment patient detail:', {
+            uhid: ipdRecord.uhid,
+            patientDetail: patientDetail,
+            name: patientDetail?.name || "Unknown",
+            phone: patientDetail?.number || "N/A"
+          });
 
           return {
             ...ipdRecord,
@@ -1058,29 +1177,44 @@ const DashboardPage: React.FC = () => {
             totalRefunds: totalRefunds,
             discount: totalDiscount,
             remainingAmount: remaining,
-            roomType: bedManagement?.room_type || "N/A",
-            admission_date: ipdRecord.admission_date,
-            admission_time: ipdRecord.admission_time,
+            roomType: roomType || "N/A",
+            admission_date: ipdRecord.admission_date, // Directly use from DB
+            admission_time: ipdRecord.admission_time, // Directly use from DB
           }
-        })
+        }))
         allPatientApps.push(...mappedIpd)
 
         const { data: otData, error: otError } = await supabase
           .from("ot_details")
           .select(
             `
-              id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at,
-              patient_detail(uhid, name, number, age, gender, address)
+              id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at
             `,
           )
           .eq("uhid", uhid)
           .order("created_at", { ascending: false })
 
         if (otError) throw otError
-        const mappedOt: OTAppointmentDisplay[] = ((otData as OTDetailsSupabase[]) || []).map((otRecord) => {
-          const otDateIST = toIST(parseISO(otRecord.ot_date)) // ot_date is also timestamp with timezone
-          const createdAtIST = toIST(parseISO(otRecord.created_at))
-          const patientDetail = otRecord.patient_detail?.[0]
+        
+        // Debug logging for OT data
+        console.log('OT data:', otData);
+        
+        const mappedOt: OTAppointmentDisplay[] = await Promise.all(((otData as OTDetailsSupabase[]) || []).map(async (otRecord) => {
+          // Fetch patient details separately like in main dashboard
+          const patientDetail = await fetchPatientDetailByUhid(otRecord.uhid);
+          
+          // Direct use of DB dates/times
+          const otDate = parseISO(otRecord.ot_date);
+          const createdAtDate = parseISO(otRecord.created_at);
+          
+          // Debug logging for each OT appointment
+          console.log('OT appointment patient detail:', {
+            uhid: otRecord.uhid,
+            patientDetail: patientDetail,
+            name: patientDetail?.name || "Unknown",
+            phone: patientDetail?.number || "N/A"
+          });
+          
           return {
             ...otRecord,
             type: "OT",
@@ -1088,16 +1222,16 @@ const DashboardPage: React.FC = () => {
             patientId: patientDetail?.uhid || otRecord.uhid || "N/A",
             name: patientDetail?.name || "Unknown",
             phone: patientDetail?.number ? String(patientDetail.number) : "N/A",
-            date: format(otDateIST, "yyyy-MM-dd"), // Use converted ot_date
-            time: format(createdAtIST, "HH:mm"), // Use converted created_at for time
+            date: format(otDate, "yyyy-MM-dd"), // Directly format
+            time: format(createdAtDate, "HH:mm"), // Directly format
             message: otRecord.ot_notes || "No notes",
           }
-        })
+        }))
         allPatientApps.push(...mappedOt)
 
         setPatientAllAppointments(
           allPatientApps.sort((a, b) => {
-            const getDateAndTimeInIST = (app: CombinedAppointment) => {
+            const getDateAndTime = (app: CombinedAppointment) => {
               let dateStr: string
               let timeStr: string | null
 
@@ -1105,17 +1239,18 @@ const DashboardPage: React.FC = () => {
                 dateStr = app.admission_date
                 timeStr = app.admission_time
               } else if (app.type === "OT") {
-                dateStr = app.date // This will be the already converted `ot_date` (YYYY-MM-DD string)
-                timeStr = app.time // This will be the already converted `created_at` time (HH:mm string)
+                dateStr = app.date // This will be the already formatted `ot_date` (YYYY-MM-DD string)
+                timeStr = app.time // This will be the already formatted `created_at` time (HH:mm string)
               } else {
                 // OPD
-                dateStr = app.date // This will be the already converted `date` (YYYY-MM-DD string)
-                timeStr = app.time // This will be the already converted `created_at` time (HH:mm string)
+                dateStr = app.date // This will be the already formatted `date` (YYYY-MM-DD string)
+                timeStr = app.time // This will be the already formatted `created_at` time (HH:mm string)
               }
-              return toIST(parseISO(`${dateStr}T${timeStr || "00:00"}`))
+              // Parse directly, assuming it's the correct time
+              return parseISO(`${dateStr}T${timeStr || "00:00"}`)
             }
-            const dateTimeA = getDateAndTimeInIST(a)
-            const dateTimeB = getDateAndTimeInIST(b)
+            const dateTimeA = getDateAndTime(a)
+            const dateTimeB = getDateAndTime(b)
 
             return dateTimeB.getTime() - dateTimeA.getTime()
           }),
@@ -1133,6 +1268,7 @@ const DashboardPage: React.FC = () => {
 
   // New: Open modal for patient's appointments
   const openPatientAppointmentsModal = async (patient: PatientInfo) => {
+    console.log('Opening modal for patient:', patient);
     setSelectedPatientForAppointments(patient)
     setPatientAppointmentsModalOpen(true)
     await fetchAllAppointmentsForPatient(patient.uhid)
@@ -1165,10 +1301,10 @@ const DashboardPage: React.FC = () => {
 
     switch (filterType) {
       case "today":
-        // Display today's date in IST (from displayStart)
+        // Display today's date
         return `Today's Data (${format(parseISO(displayStart), "MMM dd, yyyy")})`
       case "month":
-        // filters.selectedMonth is 'YYYY-MM', parse it as a local date for formatting
+        // filters.selectedMonth is 'YYYY-MM', parse it as a date for formatting
         return `${format(parseISO(filters.selectedMonth + "-01"), "MMMM yyyy")} Data`
       case "dateRange":
         if (!filters.startDate || !filters.endDate) return "Select date range"
@@ -1263,7 +1399,7 @@ const DashboardPage: React.FC = () => {
                             onClick={() =>
                               handleFilterChange({
                                 filterType: mode as any,
-                                ...(mode === "month" ? { selectedMonth: format(toIST(new Date()), "yyyy-MM") } : {}),
+                                ...(mode === "month" ? { selectedMonth: format(new Date(), "yyyy-MM") } : {}),
                               })
                             }
                             className={`px-3 py-2 rounded-lg text-sm font-medium ${
@@ -1366,7 +1502,7 @@ const DashboardPage: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-600">Net Deposit</span>
+                      <span className="text-sm text-gray-600">Total Deposits</span>
                       <span className="text-lg font-semibold text-orange-600">
                         {formatCurrency(statistics.totalIpdAmount)}
                       </span>
@@ -1493,7 +1629,7 @@ const DashboardPage: React.FC = () => {
                   {/* List */}
                   <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100">
                     <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                      <UserCheck className="mr-2 h-5 w-5 text-gray-600" /> Doctor Consultations
+                      <UserCheck className="mr-2 h-5 w-5" /> Doctor Consultations
                     </h2>
                     {doctorConsultations.length > 0 ? (
                       <div className="overflow-x-auto">
@@ -1529,7 +1665,7 @@ const DashboardPage: React.FC = () => {
                   {/* Chart */}
                   <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100">
                     <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                      <UserCheck className="mr-2 h-5 w-5 text-gray-600" /> Top Doctors by Consultations
+                      <UserCheck className="mr-2 h-5 w-5" /> Top Doctors by Consultations
                     </h2>
                     {doctorConsultChartData.labels.length > 0 ? (
                       <Bar
@@ -1537,7 +1673,7 @@ const DashboardPage: React.FC = () => {
                         options={{
                           responsive: true,
                           plugins: { legend: { position: "top" } },
-                          scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+                          scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, },
                         }}
                       />
                     ) : (
@@ -2038,7 +2174,8 @@ const DashboardPage: React.FC = () => {
                                 >
                                   <div>
                                     <span className="font-medium text-green-700">
-                                      {p.paymentType.toUpperCase()} - {p.type.toUpperCase()}
+                                      {/* Safely access and uppercase paymentType, type, or transactionType */}
+                                      {`${p.paymentType?.toUpperCase() || 'N/A'} - ${p.type?.toUpperCase() || p.transactionType?.toUpperCase() || 'N/A'}`}
                                     </span>
                                     {p.date && (
                                       <p className="text-sm text-gray-500">
@@ -2053,19 +2190,36 @@ const DashboardPage: React.FC = () => {
                             <div className="mt-4 p-4 bg-white rounded-lg border border-green-200 shadow-sm">
                               <div className="space-y-2">
                                 <div className="flex justify-between items-center">
-                                  <span className="text-green-700">Total Paid:</span>
+                                  <span className="text-green-700">Total Deposits:</span>
                                   <span className="font-bold text-green-600">
                                     {formatCurrency((selectedAppointment as IPDAppointmentDisplay).totalDeposit)}
                                   </span>
                                 </div>
-                                {(selectedAppointment as IPDAppointmentDisplay).remainingAmount! > 0 && (
+                                {(selectedAppointment as IPDAppointmentDisplay).totalRefunds > 0 && (
                                   <div className="flex justify-between items-center">
-                                    <span className="text-red-700">Remaining:</span>
+                                    <span className="text-gray-600">Total Refunds:</span>
                                     <span className="font-bold text-red-600">
-                                      {formatCurrency((selectedAppointment as IPDAppointmentDisplay).remainingAmount!)}
+                                      {formatCurrency((selectedAppointment as IPDAppointmentDisplay).totalRefunds)}
                                     </span>
                                   </div>
                                 )}
+                                {(selectedAppointment as IPDAppointmentDisplay).discount > 0 && (
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-gray-600">Total Discount:</span>
+                                    <span className="font-bold text-orange-600">
+                                      {formatCurrency((selectedAppointment as IPDAppointmentDisplay).discount)}
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="flex justify-between border-t pt-2">
+                                  <span className="text-green-700 font-bold">Net Amount Paid:</span>
+                                  <span className="font-bold text-green-600">
+                                    {formatCurrency(
+                                      (selectedAppointment as IPDAppointmentDisplay).totalDeposit -
+                                        (selectedAppointment as IPDAppointmentDisplay).totalRefunds,
+                                    )}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -2090,7 +2244,7 @@ const DashboardPage: React.FC = () => {
                             </div>
                           )}
                           <div className="flex justify-between items-center">
-                            <span className="text-gray-600">Total Net Payments:</span>
+                            <span className="text-gray-600">Total Deposits:</span>
                             <span className="font-semibold text-green-700">
                               {formatCurrency((selectedAppointment as IPDAppointmentDisplay).totalDeposit)}
                             </span>

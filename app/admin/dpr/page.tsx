@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import Layout from '@/components/global/Layout'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,9 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Progress } from '@/components/ui/progress'
+import { Progress } from '@/components/ui/progress' // Assuming this is your custom component, not direct radix import
 import {
-  BarChart,
   Users,
   Calendar,
   DollarSign,
@@ -24,73 +23,99 @@ import {
   Clock,
   UserCheck,
   Building2,
-  Heart, // Added for potential future use or specific doctor info
-  Brain // Added for potential future use or specific doctor info
 } from 'lucide-react'
-import { createClient } from '@supabase/supabase-js' // Import createClient
-import { format, startOfDay, endOfDay, parseISO, isSameDay } from 'date-fns'
-import { BarChart as RechartsBarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend } from 'recharts'
+import { supabase } from '@/lib/supabase'
+import { format, parseISO, isSameDay, startOfDay, endOfDay } from 'date-fns'
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jdflvpzeqjvjtgywayby.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpkZmx2cHplcWp2anRneXdheWJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg3NTU0OTUsImV4cCI6MjA2NDMzMTQ5NX0.u1sqXbT7d4ceSswQqD5tLDZ8DpkG0l8KYY4m4aJpgZ0';
+// Import Chart.js components
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement, // For Pie Chart
+  LineElement, // For Line Chart
+  PointElement, // For Line Chart
+} from 'chart.js';
+import { Bar, Line, Pie } from 'react-chartjs-2';
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+  LineElement,
+  PointElement
+);
 
-// Types for DPR data
+
+// --- Timezone Management (Simplified for 'timestamp without time zone' columns) ---
+
+const getDayRangeForSupabase = (dateString: string) => {
+  const start = `${dateString}T00:00:00`;
+  const end = `${dateString}T23:59:59`;
+  return { start, end };
+};
+
+
+// --- Type Definitions ---
 interface KPIData {
-  totalOPDAppointments: number
-  totalIPDAdmissions: number
-  totalDischarges: number
-  newPatientRegistrations: number
-  bedOccupancyRate: number
-  doctorsOnDuty: number
-  totalRevenue: number
-  emergencyCases: number
+  totalOPDAppointments: number;
+  totalIPDAdmissions: number;
+  totalDischarges: number;
+  totalOTProcedures: number;
+  newPatientRegistrations: number;
+  bedOccupancyRate: number;
+  totalRevenue: number;
 }
 
 interface DoctorPerformance {
-  doctorName: string
-  department: string
-  opdPatients: number // New column
-  ipdPatients: number // New column
+  doctorName: string;
+  department: string;
+  opdPatients: number;
+  ipdPatients: number;
 }
 
 interface BedManagement {
-  wardName: string
-  totalBeds: number
-  occupiedBeds: number
-  availableBeds: number
-  occupancyRate: number
+  wardName: string;
+  totalBeds: number;
+  occupiedBeds: number;
+  availableBeds: number;
+  occupancyRate: number;
 }
 
 interface PatientStatistics {
-  totalInPatients: number
-  totalOutPatients: number
-  readmissions: number
-  emergencyCases: number
-  newRegistrations: number
+  totalInPatients: number;
+  totalOutPatients: number;
+  readmissions: number;
+  newRegistrations: number;
 }
 
 interface RevenueSnapshot {
-  opdRevenue: number
-  ipdRevenue: number
-  pharmacyRevenue: number
-  labRevenue: number
-  totalRevenue: number
+  opdRevenue: number;
+  ipdRevenue: number;
+  pharmacyRevenue: number;
+  labRevenue: number;
+  totalRevenue: number;
 }
 
 interface Alert {
   type: 'warning' | 'info' | 'success';
-  message: string;
   icon: React.ElementType;
+  message: string;
 }
 
-
 const DPRPage = () => {
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [departmentFilter, setDepartmentFilter] = useState<string>('all')
-  const [isLoading, setIsLoading] = useState(false)
+  const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [departmentFilter, setDepartmentFilter] = useState<string>('all');
+  const [isLoading, setIsLoading] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
 
   // Data states
@@ -98,109 +123,168 @@ const DPRPage = () => {
     totalOPDAppointments: 0,
     totalIPDAdmissions: 0,
     totalDischarges: 0,
+    totalOTProcedures: 0,
     newPatientRegistrations: 0,
     bedOccupancyRate: 0,
-    doctorsOnDuty: 0,
     totalRevenue: 0,
-    emergencyCases: 0
-  })
+  });
 
-  const [doctorPerformance, setDoctorPerformance] = useState<DoctorPerformance[]>([])
-  const [bedManagement, setBedManagement] = useState<BedManagement[]>([])
+  const [doctorPerformance, setDoctorPerformance] = useState<DoctorPerformance[]>([]);
+  const [bedManagement, setBedManagement] = useState<BedManagement[]>([]);
   const [patientStats, setPatientStats] = useState<PatientStatistics>({
     totalInPatients: 0,
     totalOutPatients: 0,
     readmissions: 0,
-    emergencyCases: 0,
     newRegistrations: 0
-  })
+  });
   const [revenueData, setRevenueData] = useState<RevenueSnapshot>({
     opdRevenue: 0,
     ipdRevenue: 0,
     pharmacyRevenue: 0,
     labRevenue: 0,
     totalRevenue: 0
-  })
+  });
 
   // Chart data
-  const [opdIpdChartData, setOpdIpdChartData] = useState<Array<{ name: string, value: number }>>([])
-  const [revenueChartData, setRevenueChartData] = useState<Array<{ time: string, revenue: number }>>([])
-  // bedUsageData state and usage removed as per request for pie chart removal
+  const [opdIpdChartData, setOpdIpdChartData] = useState<any>({
+    labels: ['OPD', 'IPD'],
+    datasets: [{
+      label: 'Patient Count',
+      data: [0, 0],
+      backgroundColor: ['#4A90E2', '#50E3C2'], // Custom colors
+      borderRadius: 5,
+    }],
+  });
+  const [revenueTrendChartData, setRevenueTrendChartData] = useState<any>({
+    labels: [],
+    datasets: [{
+      label: 'Revenue',
+      data: [],
+      fill: false,
+      borderColor: '#BD10E0',
+      tension: 0.1,
+    }],
+  });
+  const [revenuePieChartData, setRevenuePieChartData] = useState<any>({
+    labels: ['OPD', 'IPD', 'Pharmacy', 'Lab'],
+    datasets: [{
+      data: [0, 0, 0, 0],
+      backgroundColor: ['#4A90E2', '#50E3C2', '#F5A623', '#BD10E0'],
+      borderColor: '#fff',
+      borderWidth: 2,
+    }],
+  });
 
-  useEffect(() => {
-    fetchDPRData()
-  }, [selectedDate, departmentFilter])
 
-  const fetchDPRData = async () => {
-    setIsLoading(true)
+  const fetchDPRData = useCallback(async () => {
+    setIsLoading(true);
     const currentAlerts: Alert[] = [];
     try {
-      const startOfDayISO = startOfDay(parseISO(selectedDate)).toISOString()
-      const endOfDayISO = endOfDay(parseISO(selectedDate)).toISOString()
+      const { start, end } = getDayRangeForSupabase(selectedDate);
 
       // --- Fetching data from Supabase ---
-
       const { data: opdAppointments, error: opdError } = await supabase
         .from('opd_registration')
-        .select('*')
-        .gte('created_at', startOfDayISO)
-        .lte('created_at', endOfDayISO);
-      if (opdError) throw opdError;
+        .select(`
+          created_at,
+          service_info,
+          payment_info,
+          "additional Notes",
+          opd_id
+        `)
+        .gte('created_at', start)
+        .lte('created_at', end);
+      if (opdError) {
+        console.error("Supabase OPD fetch error:", opdError);
+        throw opdError;
+      }
 
       const { data: ipdAdmissions, error: ipdError } = await supabase
         .from('ipd_registration')
-        .select('*')
-        .gte('created_at', startOfDayISO)
-        .lte('created_at', endOfDayISO);
-      if (ipdError) throw ipdError;
+        .select(`
+          created_at,
+          discharge_date,
+          under_care_of_doctor,
+          payment_detail,
+          admission_type
+        `)
+        .gte('created_at', start)
+        .lte('created_at', end);
+      if (ipdError) {
+        console.error("Supabase IPD fetch error:", ipdError);
+        throw ipdError;
+      }
+
+      const { data: otProcedures, error: otError } = await supabase
+        .from('ot_details')
+        .select(`
+          created_at,
+          ot_date,
+          ipd_id,
+          uhid,
+          ot_type,
+          ot_notes,
+          id
+        `)
+        .gte('created_at', start)
+        .lte('created_at', end);
+      if (otError) {
+        console.error("Supabase OT fetch error:", otError);
+        throw otError;
+      }
 
       const { data: newPatients, error: newPatientError } = await supabase
         .from('patient_detail')
-        .select('*')
-        .gte('created_at', startOfDayISO)
-        .lte('created_at', endOfDayISO);
-      if (newPatientError) throw newPatientError;
+        .select(`
+          created_at,
+          name,
+          uhid
+        `)
+        .gte('created_at', start)
+        .lte('created_at', end);
+      if (newPatientError) {
+        console.error("Supabase New Patients fetch error:", newPatientError);
+        throw newPatientError;
+      }
 
       const { data: doctors, error: doctorError } = await supabase
         .from('doctor')
-        .select('*');
-      if (doctorError) throw doctorError;
+        .select('dr_name, department');
+      if (doctorError) {
+        console.error("Supabase Doctors fetch error:", doctorError);
+        throw doctorError;
+      }
 
-      // Fetch ALL bed management data for capacity and current status
       const { data: beds, error: bedError } = await supabase
         .from('bed_management')
-        .select('*');
-      if (bedError) throw bedError;
+        .select('status, room_type');
+      if (bedError) {
+        console.error("Supabase Beds fetch error:", bedError);
+        throw bedError;
+      }
 
       // --- KPI Calculations ---
       const totalOPD = opdAppointments?.length || 0;
       const totalIPD = ipdAdmissions?.length || 0;
+      const totalOT = otProcedures?.length || 0;
       const newRegistrations = newPatients?.length || 0;
 
       const totalDischarges = ipdAdmissions?.filter(ipd => {
         if (ipd.discharge_date) {
-          return isSameDay(parseISO(ipd.discharge_date), parseISO(selectedDate));
+          const dischargeDateFormatted = format(parseISO(ipd.discharge_date), 'yyyy-MM-dd');
+          return dischargeDateFormatted === selectedDate;
         }
         return false;
       }).length || 0;
 
-      const emergencyCases = opdAppointments?.filter((opd: any) => {
-        return opd.department === 'Emergency' || 
-               (opd.service_info && opd.service_info.some((service: any) => service.type === 'Emergency')) ||
-               (opd.additional_notes && opd.additional_notes.toLowerCase().includes('emergency'));
-      }).length || 0;
-
-      // Calculate overall bed occupancy for KPI based on the new schema interpretation
-      const totalHospitalBeds = beds?.length || 0; // Total number of bed records implies total beds
+      const totalHospitalBeds = beds?.length || 0;
       const currentlyOccupiedBedsCount = beds?.filter(bed => bed.status === 'occupied').length || 0;
 
       const bedOccupancyRate = totalHospitalBeds > 0 ? (currentlyOccupiedBedsCount / totalHospitalBeds) * 100 : 0;
 
-      const doctorsOnDuty = doctors?.length || 0;
-
       let opdRevenue = 0;
       opdAppointments?.forEach((opd: any) => {
-        if (opd.payment_info && opd.payment_info.totalPaid) {
+        if (opd.payment_info && typeof opd.payment_info.totalPaid === 'number') {
           opdRevenue += opd.payment_info.totalPaid;
         }
       });
@@ -208,21 +292,27 @@ const DPRPage = () => {
       let ipdRevenue = 0;
       ipdAdmissions?.forEach((ipd: any) => {
         if (ipd.payment_detail && Array.isArray(ipd.payment_detail)) {
-          ipdRevenue += ipd.payment_detail.reduce((sum: number, payment: any) => {
-            return sum + (payment.amount || 0);
-          }, 0);
+          ipd.payment_detail.forEach((payment: any) => {
+            const paymentType = payment.type?.toLowerCase();
+            const amountType = payment.amountType?.toLowerCase();
+            const transactionType = payment.transactionType?.toLowerCase();
+
+            if (paymentType === 'deposit' || paymentType === 'advance' || transactionType === 'settlement' || amountType === 'deposit' || amountType === 'advance' || amountType === 'settlement') {
+              ipdRevenue += payment.amount || 0;
+            }
+          });
         }
       });
 
       let pharmacyRevenue = 0;
       let labRevenue = 0;
-      
+
       opdAppointments?.forEach((opd: any) => {
         if (opd.service_info && Array.isArray(opd.service_info)) {
           opd.service_info.forEach((service: any) => {
-            if (service.type === 'Pharmacy' || service.service?.toLowerCase().includes('pharmacy')) {
+            if (service.type?.toLowerCase() === 'pharmacy' || service.service?.toLowerCase().includes('pharmacy')) {
               pharmacyRevenue += service.charges || 0;
-            } else if (service.type === 'Lab' || service.service?.toLowerCase().includes('lab')) {
+            } else if (service.type?.toLowerCase() === 'lab' || service.service?.toLowerCase().includes('lab') || service.type?.toLowerCase() === 'pathology' || service.type?.toLowerCase() === 'radiology') {
               labRevenue += service.charges || 0;
             }
           });
@@ -235,72 +325,79 @@ const DPRPage = () => {
         totalOPDAppointments: totalOPD,
         totalIPDAdmissions: totalIPD,
         totalDischarges: totalDischarges,
+        totalOTProcedures: totalOT,
         newPatientRegistrations: newRegistrations,
         bedOccupancyRate: parseFloat(bedOccupancyRate.toFixed(2)),
-        doctorsOnDuty: doctorsOnDuty,
         totalRevenue: parseFloat(totalOverallRevenue.toFixed(2)),
-        emergencyCases: emergencyCases
       });
 
       // --- Doctor Performance ---
-      const doctorPerformanceData: DoctorPerformance[] = doctors?.map(doc => {
-        const opdCount = opdAppointments?.filter((opd: any) => {
-          if (opd.service_info && Array.isArray(opd.service_info)) {
-            return opd.service_info.some((service: any) => service.doctor === doc.dr_name);
-          }
-          return false;
-        }).length || 0;
+      const doctorPerformanceMap = new Map<string, { opdPatients: number, ipdPatients: number, department: string }>();
 
-        const ipdCount = ipdAdmissions?.filter((ipd: any) => {
-          return ipd.under_care_of_doctor === doc.dr_name;
-        }).length || 0;
+      doctors?.forEach(doc => {
+        doctorPerformanceMap.set(doc.dr_name, { opdPatients: 0, ipdPatients: 0, department: doc.department });
+      });
 
-        return {
-          doctorName: doc.dr_name,
-          department: doc.department,
-          opdPatients: opdCount,
-          ipdPatients: ipdCount,
-        };
-      }).filter(doc => doc.opdPatients > 0 || doc.ipdPatients > 0) || [];
+      opdAppointments?.forEach((opd: any) => {
+        if (opd.service_info && Array.isArray(opd.service_info)) {
+          opd.service_info.forEach((service: any) => {
+            if (service.doctor && doctorPerformanceMap.has(service.doctor)) {
+              const current = doctorPerformanceMap.get(service.doctor)!;
+              doctorPerformanceMap.set(service.doctor, { ...current, opdPatients: current.opdPatients + 1 });
+            }
+          });
+        }
+      });
+
+      ipdAdmissions?.forEach((ipd: any) => {
+        if (ipd.under_care_of_doctor && doctorPerformanceMap.has(ipd.under_care_of_doctor)) {
+          const current = doctorPerformanceMap.get(ipd.under_care_of_doctor)!;
+          doctorPerformanceMap.set(ipd.under_care_of_doctor, { ...current, ipdPatients: current.ipdPatients + 1 });
+        }
+      });
+
+      const doctorPerformanceData: DoctorPerformance[] = Array.from(doctorPerformanceMap.entries())
+        .map(([doctorName, data]) => ({
+          doctorName,
+          department: data.department,
+          opdPatients: data.opdPatients,
+          ipdPatients: data.ipdPatients,
+        }))
+        .filter(doc => doc.opdPatients > 0 || doc.ipdPatients > 0)
+        .sort((a, b) => (b.opdPatients + b.ipdPatients) - (a.opdPatients + a.ipdPatients));
 
       setDoctorPerformance(doctorPerformanceData);
 
-      // --- Bed Management Tab Data (Revised based on new schema interpretation) ---
-      const wardTypes = ['Casualty', 'ICU', 'Male', 'Female', 'NICU', 'Delux', 'Suit']; // Ensure these match your actual room_type values
+      // --- Bed Management Tab Data ---
+      const uniqueRoomTypes = Array.from(new Set(beds?.map(bed => bed.room_type).filter(Boolean))) as string[];
 
-      const bedManagementData: BedManagement[] = wardTypes.map(wardType => {
-        // Filter beds belonging to the current ward type
-        const bedsInThisWard = beds?.filter(bed => 
-          bed.room_type?.toLowerCase() === wardType.toLowerCase()
-        ) || [];
-        
-        const totalBedsInWard = bedsInThisWard.length; // Count of individual bed records for this ward
+      const bedManagementData: BedManagement[] = uniqueRoomTypes.map(roomType => {
+        const bedsInThisWard = beds?.filter(bed => bed.room_type === roomType) || [];
+
+        const totalBedsInWard = bedsInThisWard.length;
         const occupiedBedsInWard = bedsInThisWard.filter(bed => bed.status === 'occupied').length;
         const availableBedsInWard = bedsInThisWard.filter(bed => bed.status === 'available').length;
-        
-        // Recalculate occupancy rate for individual wards based on their occupied vs total
+
         const occupancyRate = totalBedsInWard > 0 ? (occupiedBedsInWard / totalBedsInWard) * 100 : 0;
-        
+
         return {
-          wardName: wardType,
+          wardName: roomType,
           totalBeds: totalBedsInWard,
           occupiedBeds: occupiedBedsInWard,
           availableBeds: availableBedsInWard,
           occupancyRate: parseFloat(occupancyRate.toFixed(1)),
         };
-      }).filter(ward => ward.totalBeds > 0); // Only show wards that have beds defined
+      }).sort((a,b) => b.occupancyRate - a.occupancyRate);
 
       setBedManagement(bedManagementData);
-      
+
       // --- Patient Statistics ---
       setPatientStats({
         totalInPatients: totalIPD,
         totalOutPatients: totalOPD,
         readmissions: ipdAdmissions?.filter(ipd => {
-          return ipd.admission_type === 'Readmission' || 
-                 (ipd.additional_notes && ipd.additional_notes.toLowerCase().includes('readmission'));
+          return ipd.admission_type?.toLowerCase() === 'readmission';
         }).length || 0,
-        emergencyCases: emergencyCases,
         newRegistrations: newRegistrations
       });
 
@@ -313,36 +410,59 @@ const DPRPage = () => {
         totalRevenue: parseFloat(totalOverallRevenue.toFixed(2))
       });
 
-      // --- Chart Data for Overview ---
-      setOpdIpdChartData([
-        { name: 'OPD', value: totalOPD },
-        { name: 'IPD', value: totalIPD }
-      ]);
+      // --- Chart Data for Overview (UPDATED FOR CHART.JS) ---
+      setOpdIpdChartData({
+        labels: ['OPD', 'IPD'],
+        datasets: [{
+          label: 'Patient Count',
+          data: [totalOPD, totalIPD],
+          backgroundColor: ['#4A90E2', '#50E3C2'],
+          borderRadius: 5,
+        }],
+      });
 
       // Generate hourly revenue trend for the selected date (Illustrative)
-      const hourlyRevenue = Array(24).fill(0).map((_, i) => ({
-        time: `${i < 10 ? '0' : ''}${i}:00`,
-        revenue: parseFloat(((totalOverallRevenue / 24) * (0.5 + Math.random() * 0.5)).toFixed(2)) 
-      }));
-      setRevenueChartData(hourlyRevenue);
+      const hourlyRevenueLabels = Array(24).fill(0).map((_, i) => `${i < 10 ? '0' : ''}${i}:00`);
+      const hourlyRevenueValues = Array(24).fill(0).map(() => parseFloat(((totalOverallRevenue / 24) * (0.8 + Math.random() * 0.4)).toFixed(2)));
+
+      setRevenueTrendChartData({
+        labels: hourlyRevenueLabels,
+        datasets: [{
+          label: 'Revenue',
+          data: hourlyRevenueValues,
+          fill: false,
+          borderColor: '#BD10E0',
+          tension: 0.1,
+          pointBackgroundColor: '#BD10E0',
+          pointBorderColor: '#fff',
+          pointHoverRadius: 7,
+          pointRadius: 5,
+        }],
+      });
+
+      // Revenue Pie Chart Data (UPDATED FOR CHART.JS)
+      setRevenuePieChartData({
+        labels: ['OPD Revenue', 'IPD Revenue', 'Pharmacy Revenue', 'Lab Revenue'],
+        datasets: [{
+          data: [opdRevenue, ipdRevenue, pharmacyRevenue, labRevenue], // Use the direct calculated revenue here
+          backgroundColor: ['#4A90E2', '#50E3C2', '#F5A623', '#BD10E0'],
+          borderColor: '#fff',
+          borderWidth: 2,
+        }],
+      });
+
 
       // --- Automated Alerts Generation ---
       if (bedOccupancyRate > 85) {
         currentAlerts.push({
           type: 'warning',
-          message: `High bed occupancy: ${kpiData.bedOccupancyRate.toFixed(1)}% across all wards. Consider resource allocation.`,
+          message: `High bed occupancy: ${bedOccupancyRate.toFixed(1)}% across all wards. Consider resource allocation.`,
           icon: AlertTriangle
         });
       }
-      if (emergencyCases > 5) {
-        currentAlerts.push({
-          type: 'warning',
-          message: `Increased emergency cases today (${emergencyCases}). Ensure adequate staff coverage.`,
-          icon: AlertTriangle
-        });
-      }
-      // Only show "No new patient registrations" if it's the current day and count is 0
-      if (newRegistrations === 0 && isSameDay(parseISO(selectedDate), new Date())) {
+
+      const todayFormattedForComparison = format(new Date(), 'yyyy-MM-dd');
+      if (newRegistrations === 0 && selectedDate === todayFormattedForComparison) {
         currentAlerts.push({
           type: 'info',
           message: 'No new patient registrations recorded today. Verify system operations.',
@@ -362,27 +482,160 @@ const DPRPage = () => {
           icon: TrendingDown
         });
       }
-      if (doctorsOnDuty < 3) {
-        currentAlerts.push({
-          type: 'warning',
-          message: `Low doctor count (${doctorsOnDuty}) on duty. Potential for service impact.`,
-          icon: Stethoscope
-        });
-      }
 
       setAlerts(currentAlerts);
 
-
     } catch (error) {
-      console.error('Error fetching DPR data:', error)
-      setAlerts([{ type: 'warning', message: 'Failed to load data. Please try again later.', icon: AlertTriangle }]);
+      console.error('Caught error during DPR data fetch:', error);
+      setAlerts([{ type: 'warning', message: 'Failed to load data. Please try again later. Check console for details.', icon: AlertTriangle }]);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  }, [selectedDate]); // Removed departmentFilter as it's not currently used in fetch logic
 
-  // Adjusted color palette for better UI/UX
-  const COLORS = ['#4A90E2', '#50E3C2', '#F5A623', '#BD10E0', '#7ED321', '#FF6B6B', '#2ECC71']; // More vibrant and modern colors
+  useEffect(() => {
+    fetchDPRData();
+  }, [selectedDate, fetchDPRData]); // Removed departmentFilter from here as well
+
+  // Adjusted color palette for better UI/UX (for Chart.js, if you need them for other elements)
+  const COLORS = ['#4A90E2', '#50E3C2', '#F5A623', '#BD10E0', '#7ED321', '#FF6B6B', '#2ECC71'];
+
+  // Chart.js Options for Bar Chart (OPD vs IPD)
+  const opdIpdBarOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        display: false,
+      },
+      title: {
+        display: false,
+      },
+      tooltip: {
+        backgroundColor: '#4A90E2',
+        titleColor: '#fff',
+        bodyColor: '#fff',
+        borderColor: '#fff',
+        borderWidth: 1,
+        padding: 12,
+      },
+    },
+    scales: {
+      x: {
+        grid: {
+          display: false,
+        },
+        ticks: {
+          color: '#4A90E2',
+          font: { weight: 'bold' as const },
+        },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: {
+          stepSize: 1,
+          color: '#4A90E2',
+          font: { weight: 'bold' as const },
+        },
+        grid: {
+          color: '#e0e7ef',
+        },
+      },
+    },
+  };
+
+  // Chart.js Options for Line Chart (Revenue Trend)
+  const revenueLineOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        display: false,
+      },
+      title: {
+        display: false,
+      },
+      tooltip: {
+        backgroundColor: '#BD10E0',
+        titleColor: '#fff',
+        bodyColor: '#fff',
+        borderColor: '#fff',
+        borderWidth: 1,
+        padding: 12,
+      },
+    },
+    scales: {
+      x: {
+        grid: {
+          display: false,
+        },
+        ticks: {
+          color: '#BD10E0',
+          font: { weight: 'bold' as const },
+          autoSkip: true,
+          maxTicksLimit: 12,
+        },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: {
+          color: '#BD10E0',
+          font: { weight: 'bold' as const },
+        },
+        grid: {
+          color: '#e0e7ef',
+        },
+      },
+    },
+  };
+
+  // Chart.js Options for Pie Chart (Revenue Breakdown)
+  const revenuePieOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'right' as const,
+        labels: {
+          color: '#4A90E2',
+          font: {
+            size: 14,
+            weight: 'bold' as const
+          }
+        }
+      },
+      tooltip: {
+        backgroundColor: '#333',
+        titleColor: '#fff',
+        bodyColor: '#fff',
+        borderColor: '#fff',
+        borderWidth: 1,
+        padding: 12,
+        callbacks: {
+          label: function(context: any) {
+            let label = context.label || '';
+            if (label) {
+              label += ': ';
+            }
+            if (context.parsed !== null) {
+              label += `₹${context.parsed.toLocaleString()}`;
+            }
+            return label;
+          }
+        }
+      },
+      // datalabels: { // This would require `chartjs-plugin-datalabels`
+      //   display: true,
+      //   color: '#fff',
+      //   formatter: (value: number, context: any) => {
+      //     const total = context.chart.data.datasets[0].data.reduce((sum: number, val: number) => sum + val, 0);
+      //     const percentage = total > 0 ? (value / total * 100).toFixed(0) : 0;
+      //     return `${percentage}%`;
+      //   },
+      //   font: {
+      //     weight: 'bold',
+      //     size: 14,
+      //   }
+      // }
+    },
+  };
 
   if (isLoading) {
     return (
@@ -391,7 +644,7 @@ const DPRPage = () => {
           <div className="text-center">
             <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-600 mx-auto mb-6"></div>
             <p className="text-lg text-gray-700 font-medium">Loading Daily Performance Report...</p>
-            <p className="text-sm text-gray-500 mt-2">Fetching the latest data for {format(parseISO(selectedDate), 'MMM dd, yyyy')}...</p>
+            <p className="text-sm text-gray-500 mt-2">Fetching the latest data for <span className="font-semibold">{format(parseISO(selectedDate), 'MMM dd, yyyy')}</span>...</p>
           </div>
         </div>
       </Layout>
@@ -419,6 +672,7 @@ const DPRPage = () => {
                 className="w-auto border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 transition duration-200"
               />
             </div>
+            {/* Department filter is still here but not fully integrated into fetchDPRData logic */}
             <div className="flex items-center gap-2">
               <Building2 className="h-5 w-5 text-gray-500" />
               <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
@@ -439,23 +693,34 @@ const DPRPage = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 gap-6">
           <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-blue-100 bg-blue-50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-blue-800">OPD Appointments</CardTitle>
+              <CardTitle className="text-sm font-medium text-blue-800">Total OPD</CardTitle>
               <Calendar className="h-5 w-5 text-blue-600" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-blue-900">{kpiData.totalOPDAppointments}</div>
-              <p className="text-xs text-blue-600 mt-1">Today's count</p>
+              <p className="text-xs text-blue-600 mt-1">Appointments on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
 
           <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-purple-100 bg-purple-50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-purple-800">IPD Admissions</CardTitle>
+              <CardTitle className="text-sm font-medium text-purple-800">Total IPD</CardTitle>
               <Building2 className="h-5 w-5 text-purple-600" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-purple-900">{kpiData.totalIPDAdmissions}</div>
-              <p className="text-xs text-purple-600 mt-1">Today's count</p>
+              <p className="text-xs text-purple-600 mt-1">Admissions on {format(parseISO(selectedDate), 'MMM dd')}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-green-100 bg-green-50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-green-800">Total OT</CardTitle>
+              <Stethoscope className="h-5 w-5 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-green-900">{kpiData.totalOTProcedures}</div>
+              <p className="text-xs text-green-600 mt-1">Procedures on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
 
@@ -466,29 +731,7 @@ const DPRPage = () => {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-teal-900">{kpiData.bedOccupancyRate.toFixed(1)}%</div>
-              <p className="text-xs text-teal-600 mt-1">Current rate</p>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-indigo-100 bg-indigo-50">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-indigo-800">Total Revenue</CardTitle>
-              <DollarSign className="h-5 w-5 text-indigo-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-indigo-900">₹{kpiData.totalRevenue.toLocaleString()}</div>
-              <p className="text-xs text-indigo-600 mt-1">Today's earnings</p>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-emerald-100 bg-emerald-50">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-emerald-800">Discharges</CardTitle>
-              <UserCheck className="h-5 w-5 text-emerald-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-emerald-900">{kpiData.totalDischarges}</div>
-              <p className="text-xs text-emerald-600 mt-1">Today's discharges</p>
+              <p className="text-xs text-teal-600 mt-1">Current rate as of {format(new Date(), 'MMM dd, HH:mm')}</p>
             </CardContent>
           </Card>
 
@@ -499,29 +742,40 @@ const DPRPage = () => {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-rose-900">{kpiData.newPatientRegistrations}</div>
-              <p className="text-xs text-rose-600 mt-1">Today's registrations</p>
+              <p className="text-xs text-rose-600 mt-1">Registrations on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-cyan-100 bg-cyan-50">
+          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-emerald-100 bg-emerald-50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-cyan-800">Doctors on Duty</CardTitle>
-              <Stethoscope className="h-5 w-5 text-cyan-600" />
+              <CardTitle className="text-sm font-medium text-emerald-800">Discharges</CardTitle>
+              <UserCheck className="h-5 w-5 text-emerald-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-cyan-900">{kpiData.doctorsOnDuty}</div>
-              <p className="text-xs text-cyan-600 mt-1">Active staff</p>
+              <div className="text-3xl font-bold text-emerald-900">{kpiData.totalDischarges}</div>
+              <p className="text-xs text-emerald-600 mt-1">Discharges on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-red-100 bg-red-50">
+          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-indigo-100 bg-indigo-50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-red-800">Emergency Cases</CardTitle>
-              <AlertTriangle className="h-5 w-5 text-red-600" />
+                  <CardTitle className="text-sm font-medium text-indigo-800">OPD Revenue</CardTitle>
+              <DollarSign className="h-5 w-5 text-indigo-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-red-900">{kpiData.emergencyCases}</div>
-              <p className="text-xs text-red-600 mt-1">Today's emergencies</p>
+              <div className="text-3xl font-bold text-indigo-900">₹{revenueData.opdRevenue.toLocaleString()}</div>
+              <p className="text-xs text-indigo-600 mt-1">Earnings on {format(parseISO(selectedDate), 'MMM dd')}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-orange-100 bg-orange-50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-orange-800">IPD Revenue</CardTitle>
+              <DollarSign className="h-5 w-5 text-orange-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-orange-900">₹{revenueData.ipdRevenue.toLocaleString()}</div>
+              <p className="text-xs text-orange-600 mt-1">Earnings on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
         </div>
@@ -539,43 +793,30 @@ const DPRPage = () => {
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* OPD vs IPD Chart */}
+              {/* OPD vs IPD Chart (Chart.js Bar) */}
               <Card className="shadow-lg border border-gray-100">
                 <CardHeader className="border-b pb-4">
                   <CardTitle className="text-xl font-semibold text-gray-800">OPD vs IPD Comparison ({format(parseISO(selectedDate), 'dd-MM-yyyy')})</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-6">
-                  <ResponsiveContainer width="100%" height={300}>
-                    <RechartsBarChart data={opdIpdChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200" />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} className="text-sm text-gray-600" />
-                      <YAxis axisLine={false} tickLine={false} className="text-sm text-gray-600" />
-                      <Tooltip cursor={{ fill: 'rgba(0,0,0,0.05)' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                      <Bar dataKey="value" fill="#4A90E2" radius={[4, 4, 0, 0]} />
-                    </RechartsBarChart>
-                  </ResponsiveContainer>
+                  <div className="h-[300px]"> {/* Chart.js needs a defined height */}
+                    <Bar data={opdIpdChartData} options={opdIpdBarOptions} />
+                  </div>
                 </CardContent>
               </Card>
 
-              {/* Revenue Trend */}
+              {/* Revenue Trend (Chart.js Line) */}
               <Card className="shadow-lg border border-gray-100">
                 <CardHeader className="border-b pb-4">
                   <CardTitle className="text-xl font-semibold text-gray-800">Daily Revenue Trend ({format(parseISO(selectedDate), 'dd-MM-yyyy')})</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-6">
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={revenueChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200" />
-                      <XAxis dataKey="time" axisLine={false} tickLine={false} className="text-sm text-gray-600" />
-                      <YAxis axisLine={false} tickLine={false} className="text-sm text-gray-600" />
-                      <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                      <Line type="monotone" dataKey="revenue" stroke="#BD10E0" strokeWidth={3} dot={{ r: 5 }} activeDot={{ r: 8 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <div className="h-[300px]"> {/* Chart.js needs a defined height */}
+                    <Line data={revenueTrendChartData} options={revenueLineOptions} />
+                  </div>
                 </CardContent>
               </Card>
             </div>
-            {/* Bed Usage Pie Chart removed as per request */}
           </TabsContent>
 
           {/* Performance Tab */}
@@ -666,7 +907,7 @@ const DPRPage = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-blue-900">{patientStats.totalInPatients}</div>
-                  <p className="text-xs text-blue-600 mt-1">Currently admitted today</p>
+                  <p className="text-xs text-blue-600 mt-1">Admitted on {format(parseISO(selectedDate), 'MMM dd')}</p>
                 </CardContent>
               </Card>
 
@@ -677,7 +918,7 @@ const DPRPage = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-purple-900">{patientStats.totalOutPatients}</div>
-                  <p className="text-xs text-purple-600 mt-1">Visited today</p>
+                  <p className="text-xs text-purple-600 mt-1">Visited on {format(parseISO(selectedDate), 'MMM dd')}</p>
                 </CardContent>
               </Card>
 
@@ -688,18 +929,7 @@ const DPRPage = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-orange-900">{patientStats.readmissions}</div>
-                  <p className="text-xs text-orange-600 mt-1">Today's count</p>
-                </CardContent>
-              </Card>
-
-              <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-red-100 bg-red-50">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-red-800">Emergency Cases</CardTitle>
-                  <AlertTriangle className="h-5 w-5 text-red-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold text-red-900">{patientStats.emergencyCases}</div>
-                  <p className="text-xs text-red-600 mt-1">Today's emergencies</p>
+                  <p className="text-xs text-orange-600 mt-1">On {format(parseISO(selectedDate), 'MMM dd')}</p>
                 </CardContent>
               </Card>
 
@@ -710,7 +940,7 @@ const DPRPage = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-green-900">{patientStats.newRegistrations}</div>
-                  <p className="text-xs text-green-600 mt-1">Today's new patients</p>
+                  <p className="text-xs text-green-600 mt-1">On {format(parseISO(selectedDate), 'MMM dd')}</p>
                 </CardContent>
               </Card>
             </div>
@@ -726,7 +956,7 @@ const DPRPage = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-blue-900">₹{revenueData.opdRevenue.toLocaleString()}</div>
-                  <p className="text-xs text-blue-600 mt-1">Today's total</p>
+                  <p className="text-xs text-blue-600 mt-1">On {format(parseISO(selectedDate), 'MMM dd')}</p>
                 </CardContent>
               </Card>
 
@@ -737,7 +967,7 @@ const DPRPage = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-purple-900">₹{revenueData.ipdRevenue.toLocaleString()}</div>
-                  <p className="text-xs text-purple-600 mt-1">Today's total</p>
+                  <p className="text-xs text-purple-600 mt-1">On {format(parseISO(selectedDate), 'MMM dd')}</p>
                 </CardContent>
               </Card>
 
@@ -748,7 +978,7 @@ const DPRPage = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-teal-900">₹{revenueData.pharmacyRevenue.toLocaleString()}</div>
-                  <p className="text-xs text-teal-600 mt-1">Today's total</p>
+                  <p className="text-xs text-teal-600 mt-1">On {format(parseISO(selectedDate), 'MMM dd')}</p>
                 </CardContent>
               </Card>
 
@@ -759,7 +989,7 @@ const DPRPage = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-indigo-900">₹{revenueData.labRevenue.toLocaleString()}</div>
-                  <p className="text-xs text-indigo-600 mt-1">Today's total</p>
+                  <p className="text-xs text-indigo-600 mt-1">On {format(parseISO(selectedDate), 'MMM dd')}</p>
                 </CardContent>
               </Card>
             </div>
@@ -769,33 +999,9 @@ const DPRPage = () => {
                 <CardTitle className="text-xl font-semibold text-gray-800">Revenue Breakdown ({format(parseISO(selectedDate), 'dd-MM-yyyy')})</CardTitle>
               </CardHeader>
               <CardContent className="pt-6 flex justify-center items-center">
-                <ResponsiveContainer width="100%" height={400}>
-                  <PieChart>
-                    <Pie
-                      data={[
-                        { name: 'OPD', value: revenueData.opdRevenue },
-                        { name: 'IPD', value: revenueData.ipdRevenue },
-                        { name: 'Pharmacy', value: revenueData.pharmacyRevenue },
-                        { name: 'Lab', value: revenueData.labRevenue }
-                      ]}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                      outerRadius={100}
-                      fill="#8884d8"
-                      dataKey="value"
-                      stroke="white"
-                      strokeWidth={2}
-                    >
-                      {COLORS.map((color, index) => (
-                        <Cell key={`cell-${index}`} fill={color} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                    <Legend layout="vertical" verticalAlign="middle" align="right" />
-                  </PieChart>
-                </ResponsiveContainer>
+                <div className="h-[400px]"> {/* Chart.js needs a defined height */}
+                  <Pie data={revenuePieChartData} options={revenuePieOptions} />
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -833,7 +1039,7 @@ const DPRPage = () => {
               ) : (
                 <div className="flex items-center gap-3 p-4 bg-gray-50 border border-gray-200 rounded-lg shadow-sm">
                   <Clock className="h-5 w-5 text-gray-500" />
-                  <span className="text-base font-medium text-gray-700">No specific alerts for today. All systems nominal.</span>
+                  <span className="text-base font-medium text-gray-700">No specific alerts for this date. All systems nominal.</span>
                 </div>
               )}
             </div>

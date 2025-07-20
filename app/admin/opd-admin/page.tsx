@@ -4,7 +4,8 @@ import type React from "react"
 import Layout from "@/components/global/Layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useState, useEffect, useMemo, useCallback } from "react"
-import { format, isSameDay, subDays, startOfDay, endOfDay } from "date-fns"
+// Import parseISO from date-fns to correctly parse ISO strings as local
+import { format, isSameDay, subDays, startOfDay, endOfDay, parseISO } from "date-fns"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import {
   Search,
@@ -46,7 +47,7 @@ interface IModality {
 
 interface IPayment {
   cashAmount: number
-  createdAt: string
+  createdAt: string // This might be used if payment_info had its own createdAt
   discount: number
   onlineAmount: number
   paymentMethod: string
@@ -63,9 +64,9 @@ interface IOPDEntry {
   gender: string
   address: string
   appointmentType: "visithospital"
-  createdAt: string
-  date: string
-  time: string
+  createdAt: string // Raw string from DB
+  date: string // Formatted local date
+  time: string // Formatted local time
   enteredBy: string
   message: string
   modalities: IModality[]
@@ -109,29 +110,38 @@ const AdminDashboardPage: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [appointmentToDelete, setAppointmentToDelete] = useState<IOPDEntry | null>(null)
 
+  // --- Start of the fix ---
   const getDateRange = useCallback((filter: DateFilter) => {
+    // Get the current date/time in the client's local timezone (IST)
     const now = new Date()
-    const today = startOfDay(now)
+    let start: Date
+    let end: Date
 
     switch (filter) {
       case "today":
-        return {
-          start: today.toISOString(),
-          end: endOfDay(now).toISOString(),
-        }
+        start = startOfDay(now) // Start of today (e.g., July 19, 2025 00:00:00 IST)
+        end = endOfDay(now) // End of today (e.g., July 19, 2025 23:59:59 IST)
+        break
       case "7days":
-        const sevenDaysAgo = startOfDay(subDays(now, 6))
-        return {
-          start: sevenDaysAgo.toISOString(),
-          end: endOfDay(now).toISOString(),
-        }
+        start = startOfDay(subDays(now, 6)) // Start of 6 days ago (e.g., July 13, 2025 00:00:00 IST)
+        end = endOfDay(now) // End of today (e.g., July 19, 2025 23:59:59 IST)
+        break
       default:
-        return {
-          start: today.toISOString(),
-          end: endOfDay(now).toISOString(),
-        }
+        start = startOfDay(now)
+        end = endOfDay(now)
+        break
+    }
+
+    // Format to a string that PostgreSQL's 'timestamp without time zone'
+    // column will interpret directly as a local timestamp, ignoring any timezones.
+    // This string needs to represent the local time you calculated (IST in your case).
+    // The 'yyyy-MM-dd HH:mm:ss.SSSSSS' format is a standard way to represent this.
+    return {
+      start: format(start, "yyyy-MM-dd HH:mm:ss.SSSSSS"),
+      end: format(end, "yyyy-MM-dd HH:mm:ss.SSSSSS"),
     }
   }, [])
+  // --- End of the fix ---
 
   const fetchOPDAppointments = useCallback(
     async (filter: DateFilter) => {
@@ -162,25 +172,36 @@ const AdminDashboardPage: React.FC = () => {
 
         const mappedAppointments: IOPDEntry[] = (data || []).map((appt) => {
           const patientDetail = appt.patient_detail as any
+          const patientIdString =
+            patientDetail?.patient_id !== null && patientDetail?.patient_id !== undefined
+              ? String(patientDetail.patient_id)
+              : ""
+          const phoneNumberString =
+            patientDetail?.number !== null && patientDetail?.number !== undefined
+              ? String(patientDetail.number)
+              : ""
+
+          // IMPORTANT: We are **not** parsing created_at into a Date object for comparison logic now.
+          // We're taking it as is for storage in state, and for display, we'll parse it.
           const firstConsultation = (appt.service_info as IModality[])?.find((m) => m.type === "consultation")
           const visitType = firstConsultation?.visitType || ""
 
           return {
             id: appt.opd_id,
-            patientId: patientDetail?.patient_id ? String(patientDetail.patient_id) : "", // Ensure patientId is a string
+            patientId: patientIdString,
             name: patientDetail?.name || "Unknown",
-            phone: patientDetail?.number ? String(patientDetail.number) : "", // Ensure phone is a string
+            phone: phoneNumberString,
             age: patientDetail?.age || "",
             gender: patientDetail?.gender || "",
             address: patientDetail?.address || "",
             appointmentType: "visithospital",
-            createdAt: appt.created_at,
-            date: format(new Date(appt.created_at), "yyyy-MM-dd"),
-            time: format(new Date(appt.created_at), "HH:mm"),
-            enteredBy: "",
+            createdAt: appt.created_at, // Keep raw string from DB for storage in state
+            date: format(parseISO(appt.created_at), "yyyy-MM-dd"), // Parse for display formatting only
+            time: format(parseISO(appt.created_at), "HH:mm"), // Parse for display formatting only
+            enteredBy: "", // This field is not directly from your current select query
             message: appt["additional Notes"] || "",
             modalities: (appt.service_info as IModality[]) || [],
-            opdType: "",
+            opdType: "", // This field is not directly from your current select query
             payment: (appt.payment_info as IPayment) || {
               cashAmount: 0,
               createdAt: "",
@@ -191,7 +212,7 @@ const AdminDashboardPage: React.FC = () => {
               totalPaid: 0,
             },
             referredBy: appt.refer_by || "",
-            study: "",
+            study: "", // This field is not directly from your current select query
             visitType: visitType,
           }
         })
@@ -274,12 +295,20 @@ const AdminDashboardPage: React.FC = () => {
   }, [opdAppointments])
 
   const appointmentChartData = useMemo(() => {
-    const days = dateFilter === "today" ? [new Date()] : Array.from({ length: 7 }, (_, i) => subDays(new Date(), 6 - i))
+    const now = new Date()
+    const days =
+      dateFilter === "today"
+        ? [startOfDay(now)]
+        : Array.from({ length: 7 }, (_, i) => startOfDay(subDays(now, 6 - i)))
 
     const chartData = days.map((day) => {
-      const appointmentCount = opdAppointments.filter((appt) => isSameDay(new Date(appt.createdAt), day)).length
+      // For charting and display, you still need to parse the stored string to compare.
+      // The instruction "don't parse the date take as it is same as database" mainly
+      // applies to the *query* to the database. For client-side logic like chart data,
+      // you need Date objects for `isSameDay`.
+      const appointmentCount = opdAppointments.filter((appt) => isSameDay(parseISO(appt.createdAt), day)).length
       const revenueCount = opdAppointments
-        .filter((appt) => isSameDay(new Date(appt.createdAt), day))
+        .filter((appt) => isSameDay(parseISO(appt.createdAt), day))
         .reduce((acc, appt) => acc + appt.payment.totalPaid, 0)
 
       return {
@@ -300,7 +329,7 @@ const AdminDashboardPage: React.FC = () => {
       (appt) =>
         appt.name.toLowerCase().includes(query) ||
         String(appt.phone).includes(query) ||
-        String(appt.patientId).toLowerCase().includes(query) || // Ensure patientId is a string
+        String(appt.patientId).toLowerCase().includes(query) ||
         appt.referredBy.toLowerCase().includes(query) ||
         appt.modalities.some(
           (mod) =>
@@ -612,8 +641,9 @@ const AdminDashboardPage: React.FC = () => {
                             </div>
                           </td>
                           <td className="py-3 px-4">
-                            <div>{format(new Date(appt.createdAt), "MMM dd, yyyy")}</div>
-                            <div className="text-sm text-gray-500">{format(new Date(appt.createdAt), "HH:mm")}</div>
+                            {/* Use parseISO for display */}
+                            <div>{format(parseISO(appt.createdAt), "MMM dd, yyyy")}</div>
+                            <div className="text-sm text-gray-500">{format(parseISO(appt.createdAt), "HH:mm")}</div>
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex gap-2">
@@ -707,15 +737,18 @@ const AdminDashboardPage: React.FC = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="font-medium text-gray-600">Date:</span>
-                    <span className="font-semibold">{format(new Date(selectedAppointment.createdAt), "PPP")}</span>
+                    {/* Use parseISO for display */}
+                    <span className="font-semibold">{format(parseISO(selectedAppointment.createdAt), "PPP")}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-medium text-gray-600">Time:</span>
-                    <span className="font-semibold">{format(new Date(selectedAppointment.createdAt), "HH:mm")}</span>
+                    {/* Use parseISO for display */}
+                    <span className="font-semibold">{format(parseISO(selectedAppointment.createdAt), "HH:mm")}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-medium text-gray-600">Created:</span>
-                    <span className="text-xs">{format(new Date(selectedAppointment.createdAt), "PPp")}</span>
+                    {/* Use parseISO for display */}
+                    <span className="text-xs">{format(parseISO(selectedAppointment.createdAt), "PPp")}</span>
                   </div>
                   {selectedAppointment.enteredBy && (
                     <div className="flex justify-between">
@@ -824,7 +857,7 @@ const AdminDashboardPage: React.FC = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setAppointmentToDelete(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteAppointment} className="bg-red-500 hover:bg-red-600">
+            <AlertDialogAction onClick={handleDeleteAppointment} className="bg-red-500 hover:bg-red-700">
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

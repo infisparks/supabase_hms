@@ -23,9 +23,11 @@ interface ServiceItem {
 interface Payment {
   id?: string
   amount: number
-  paymentType: string
+  paymentType: string // e.g., "cash", "online"
+  transactionType: "advance" | "refund" | "deposit" | "discount" | "settlement" // Renamed from 'type'
+  amountType: "advance" | "deposit" | "settlement" | "refund" | "discount" // New: explicit type for calculation/display
   date: string
-  type: "advance" | "refund" | "deposit" | "discount" // Added type for consistency
+  through?: string // Added 'through' field
 }
 
 export interface BillingRecord {
@@ -45,7 +47,7 @@ export interface BillingRecord {
 
   dischargeDate?: string | null
 
-  totalDeposit: number
+  totalDeposit: number // This is the sum of advance, deposit, settlement payments minus refunds
   roomType?: string | null
   bedNumber?: number | string | null
   bedType?: string | null
@@ -55,10 +57,11 @@ export interface BillingRecord {
   createdAt?: string
 
   services: ServiceItem[]
-  payments: Payment[]
-  discount?: number
+  payments: Payment[] // Updated to use new Payment interface
+  discount: number // This is the sum of discount payments
 
   doctor?: string | null
+  billNumber?: number | null // Add bill number to BillingRecord
 }
 
 interface IDoctor {
@@ -315,30 +318,40 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
   }
 
   // Group Hospital Services
+
   const groupedHospitalServices = Object.values(
     record.services
       .filter((s) => s.type === "service")
       .reduce(
         (acc, service) => {
           const key = service.serviceName
+
           if (!acc[key]) {
             acc[key] = {
               serviceName: service.serviceName,
+
               quantity: 1,
+
               unitAmount: service.amount,
+
               totalAmount: service.amount,
             }
           } else {
             acc[key].quantity += 1
+
             acc[key].totalAmount = acc[key].unitAmount * acc[key].quantity
           }
+
           return acc
         },
         {} as {
           [key: string]: {
             serviceName: string
+
             quantity: number
+
             unitAmount: number
+
             totalAmount: number
           }
         },
@@ -346,30 +359,40 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
   )
 
   // Group Consultant Charges by Doctor Name
+
   const groupedConsultantServices = Object.values(
     record.services
       .filter((s) => s.type === "doctorvisit")
       .reduce(
         (acc, service) => {
           const key = service.doctorName || "NoName"
+
           if (!acc[key]) {
             acc[key] = {
               doctorName: service.doctorName || "",
+
               quantity: 1,
+
               unitAmount: service.amount,
+
               totalAmount: service.amount,
             }
           } else {
             acc[key].quantity += 1
+
             acc[key].totalAmount = acc[key].unitAmount * acc[key].quantity
           }
+
           return acc
         },
         {} as {
           [key: string]: {
             doctorName: string
+
             quantity: number
+
             unitAmount: number
+
             totalAmount: number
           }
         },
@@ -377,28 +400,43 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
   )
 
   // Determine the primary doctor for "Under care of Dr."
-  // FIX: Directly use record.doctor as it contains the doctor's name (string)
-  const primaryDoctorName = record.doctor || "N/A"
 
+  const primaryDoctorName = record.doctor || "N/A"
   // Get room and bed details
+
   const roomName = record.roomType || "N/A"
   const bedNumber = record.bedNumber || "N/A"
-  const bedType = record.bedType || "N/A" // Directly from record.bedType
+  const bedType = record.bedType || "N/A"
+
+  // Format bill number to 4 digits with leading zeros
+  const formattedBillNumber = typeof record.billNumber === 'number' && !isNaN(record.billNumber)
+    ? record.billNumber.toString().padStart(4, '0')
+    : null;
 
   // Totals Calculation
+
   const hospitalServiceTotal = record.services.filter((s) => s.type === "service").reduce((sum, s) => sum + s.amount, 0)
+
   const consultantChargeTotal = record.services
     .filter((s) => s.type === "doctorvisit")
     .reduce((sum, s) => sum + s.amount, 0)
+
   const discount = record.discount || 0
+
   const subtotal = hospitalServiceTotal + consultantChargeTotal
+
   const netTotal = subtotal - discount
-  const deposit = record.totalDeposit // Using totalDeposit from BillingRecord
+
+  const deposit = record.totalDeposit
+
   const dueAmount = netTotal - deposit
 
   // Calculate day count
+
   const startDate = record.admitDate || record.createdAt || null
-  const endDate = record.dischargeDate || null
+
+  const endDate = record.dischargeDate ? new Date(record.dischargeDate) : new Date()
+
   const dayCount = calculateDaysBetween(startDate, endDate)
 
   const showConsultantTable = groupedConsultantServices.length > 0
@@ -435,8 +473,11 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
         <div className="text-[10px] text-gray-800 p-2 bg-transparent max-w-[520px]">
           {/* Header */}
 
+          
+
           <div className="flex justify-between mb-2">
-            <div className="flex flex-col">
+            {/* Left Column - Patient Details */}
+            <div className="flex flex-col flex-1 text-left pr-2"> {/* Added flex-1 and pr-2 for spacing */}
               <p>
                 <strong>Patient Name:</strong> {record.name} ({record.uhid})
               </p>
@@ -461,7 +502,8 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
               </p>
             </div>
 
-            <div className="text-right flex flex-col">
+            {/* Right Column - Dates and Other Info */}
+            <div className="text-right flex flex-col flex-1 pl-2"> {/* Added flex-1 and pl-2 for spacing */}
               <p>
                 <strong>Admit Date:</strong>{" "}
                 {record.admitDate ? (
@@ -491,6 +533,12 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
               <p>
                 <strong>Stay Duration:</strong> {dayCount} {dayCount === 1 ? "day" : "days"}
               </p>
+              {/* Bill Number below Stay Duration */}
+              {formattedBillNumber && (
+                <p>
+                  <strong>Bill Number:</strong> {formattedBillNumber}
+                </p>
+              )}
             </div>
           </div>
 
@@ -573,60 +621,115 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
           </div>
 
           {/* Final Summary Section */}
+          {/* Adjusted to take less height and align amounts left */}
+          <div className="flex flex-col items-start mt-2 text-[8px] max-w-[520px] w-full">
+            <div className="grid grid-cols-2 gap-x-4 w-full">
+              <div className="flex flex-col space-y-0.5"> {/* Left side for amounts in words */}
+                {dueAmount > 0 && (
+                  <p>
+                    <strong>Due Amount in Words:</strong> {convertNumberToWords(dueAmount)} Rupees Only
+                  </p>
+                )}
 
-          <div className="mt-2 p-1 rounded text-[8px] w-[200px] ml-auto">
-            <p className="flex justify-between w-full">
-              <span>Total Amount:</span>
+                {dueAmount < 0 && (
+                  <p>
+                    <strong>Refund Amount in Words:</strong> {convertNumberToWords(Math.abs(dueAmount))} Rupees Only
+                  </p>
+                )}
+              </div>
 
-              <span>Rs. {subtotal.toLocaleString()}</span>
-            </p>
+              <div className="flex flex-col space-y-0.5 text-right"> {/* Right side for numerical summary */}
+                <p className="flex justify-between w-full">
+                  <span>Total Amount:</span>
+                  <span>Rs. {subtotal.toLocaleString()}</span>
+                </p>
 
-            {discount > 0 && (
-              <p className="flex justify-between w-full text-green-600 font-bold">
-                <span>Discount:</span>
+                {discount > 0 && (
+                  <p className="flex justify-between w-full text-green-600 font-bold">
+                    <span>Discount:</span>
+                    <span>- Rs. {discount.toLocaleString()}</span>
+                  </p>
+                )}
 
-                <span>- Rs. {discount.toLocaleString()}</span>
-              </p>
-            )}
+                <hr className="my-0.5 border-gray-300" />
 
-            <hr className="my-1" />
+                <p className="flex justify-between w-full font-bold">
+                  <span>Net Total:</span>
+                  <span>Rs. {netTotal.toLocaleString()}</span>
+                </p>
 
-            <p className="flex justify-between w-full font-bold">
-              <span>Net Total:</span>
+                <p className="flex justify-between w-full">
+                  <span>Total Paid:</span>
+                  <span>Rs. {deposit.toLocaleString()}</span>
+                </p>
 
-              <span>Rs. {netTotal.toLocaleString()}</span>
-            </p>
+                <p
+                  className={`flex justify-between w-full font-semibold ${
+                    dueAmount < 0 ? "text-blue-600" : "text-red-600"
+                  }`}
+                >
+                  <span>{dueAmount < 0 ? "Refund Amount:" : "Due Amount:"}</span>
 
-            <p className="flex justify-between w-full">
-              <span>Deposit Amount:</span>
-
-              <span>Rs. {deposit.toLocaleString()}</span>
-            </p>
-
-            <p
-              className={`flex justify-between w-full font-semibold text-[8px] ${
-                dueAmount < 0 ? "text-blue-600" : "text-red-600"
-              }`}
-            >
-              <span>{dueAmount < 0 ? "Refund Amount:" : "Due Amount:"}</span>
-
-              <span>
-                {dueAmount < 0 ? "Rs. " + Math.abs(dueAmount).toLocaleString() : "Rs. " + dueAmount.toLocaleString()}
-              </span>
-            </p>
-
-            {dueAmount > 0 && (
-              <p className="mt-1 text-[8px] ">
-                <strong>Due Amount in Words:</strong> {convertNumberToWords(dueAmount)} Rupees Only
-              </p>
-            )}
-
-            {dueAmount < 0 && (
-              <p className="mt-1 text-[8px] text-black">
-                <strong>Refund Amount in Words:</strong> {convertNumberToWords(Math.abs(dueAmount))} Rupees Only
-              </p>
-            )}
+                  <span>
+                    {dueAmount < 0 ? "Rs. " + Math.abs(dueAmount).toLocaleString() : "Rs. " + dueAmount.toLocaleString()}
+                  </span>
+                </p>
+              </div>
+            </div>
           </div>
+
+
+          {/* Payment History Section - Moved below Final Summary */}
+          {record.payments && record.payments.length > 0 && (
+            <div className="my-2 max-w-[520px] w-full">
+              <h3 className="font-semibold mb-1 text-[10px]">Payment History</h3>
+              <div className="flex">
+                <table className="w-full text-[7px]"> {/* Full width like service tables */}
+                  <thead>
+                  <tr className="">
+  {/* The vertical alignment should be on the <th> elements for table cells */}
+  <th className="py-0.5 px-1 text-left w-[120px]" style={{ verticalAlign: 'middle' }}>Remarks</th>
+  <th className="py-0.5 px-1 text-left" style={{ verticalAlign: 'middle' }}>Date</th>
+  <th className="py-0.5 px-1 text-left" style={{ verticalAlign: 'middle' }}>Type</th>
+  <th className="py-0.5 px-1 text-left" style={{ verticalAlign: 'middle' }}>Through</th>
+  <th className="py-0.5 px-1 text-right" style={{ verticalAlign: 'middle' }}>Amount (Rs)</th>
+</tr>
+                  </thead>
+                  <tbody>
+                    {record.payments.map((payment, idx) => {
+                      // Determine 'through' value if missing
+                      let displayThrough = payment.through;
+                      if (!displayThrough) {
+                        if (payment.paymentType === "cash") {
+                          displayThrough = "Cash";
+                        } else if (payment.paymentType === "online" || payment.paymentType === "card") {
+                          displayThrough = "Online";
+                        } else {
+                          displayThrough = "N/A";
+                        }
+                      }
+
+                      return (
+                        <tr key={idx}>
+                          <td className="py-0.5 px-1"></td> {/* Blank for remarks */}
+                          <td className="py-0.5 px-1">{formatDate(payment.date)}</td>
+                          <td className="py-0.5 px-1 capitalize">{payment.amountType}</td>
+                          <td className="py-0.5 px-1 capitalize">{displayThrough}</td>
+                          <td className="py-0.5 px-1 text-right">{payment.amount.toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className=" font-bold">
+                      <td colSpan={4} className="py-1 px-1 text-right">Total Paid:</td> {/* Increased padding for total row */}
+                      <td className="py-1 px-1 text-right">Rs. {record.totalDeposit.toLocaleString()}</td> {/* Increased padding */}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

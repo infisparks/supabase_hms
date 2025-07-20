@@ -68,14 +68,14 @@ const Sidebar = () => {
         { title: 'Add Service', href: '/admin/add-service' },
       ]
     },
-    {
-      title: 'Changes',
-      icon: Settings,
-      submenu: [
-        { title: 'OPD Changes', href: '/changes/opd-changes' },
-        { title: 'IPD Changes', href: '/changes/ipd-changes' },
-      ]
-    },
+    // {
+    //   title: 'Changes',
+    //   icon: Settings,
+    //   submenu: [
+    //     { title: 'OPD Changes', href: '/changes/opd-changes' },
+    //     { title: 'IPD Changes', href: '/changes/ipd-changes' },
+    //   ]
+    // },
     {
       title: 'OPD',
       icon: Stethoscope,

@@ -75,8 +75,9 @@ interface PaymentDetailItemSupabase {
   amount: number
   createdAt: string
   date: string
-  paymentType: string
-  type: "advance" | "refund" | "deposit" | "discount" // Added "discount" type
+  paymentType: string // e.g., "cash", "online"
+  transactionType: "advance" | "refund" | "deposit" | "discount" | "settlement" // Renamed from 'type'
+  amountType?: "advance" | "deposit" | "settlement" | "refund" | "discount" // New field for clearer categorization
   through?: string // Added 'through' field here
 }
 
@@ -95,7 +96,7 @@ interface IPDRegistrationSupabaseJoined {
   admission_source: string | null
   admission_type: string | null
   under_care_of_doctor: string | null
-  payment_detail: PaymentDetailItemSupabase[] | null
+  payment_detail: PaymentDetailItemSupabase[] | null // Updated to include 'through' and new type
   bed_id: bigint | null // Supabase returns bigint for numeric IDs
   service_detail: ServiceDetailItemSupabase[] | null
   created_at: string
@@ -108,6 +109,7 @@ interface IPDRegistrationSupabaseJoined {
   uhid: string
   patient_detail: PatientDetailSupabase | null
   bed_management: BedManagementSupabase | null
+  billno?: number | null // <-- Add this line
 }
 
 // Consolidated BillingRecord for UI state, similar to your Firebase structure
@@ -131,12 +133,13 @@ export interface BillingRecord {
   bedNumber?: number | string | null
   bedType?: string | null
   services: ServiceDetailItemSupabase[]
-  payments: PaymentDetailItemSupabase[]
+  payments: PaymentDetailItemSupabase[] // Updated to use new PaymentDetailItemSupabase
   discount: number // Calculated from payment_detail entries
   admitDate?: string | null
   admissionTime?: string | null
   createdAt?: string
   doctor?: string | null
+  billNumber?: number | null // <-- Correct type
 }
 
 // MasterServiceOption - Now without is_consultant and doctor_id (as they are removed from DB)
@@ -155,8 +158,8 @@ interface AdditionalServiceForm {
 
 interface PaymentForm {
   paymentAmount: number
-  paymentType: string
-  type: "advance" | "refund" // Type of financial transaction, not for discounts
+  paymentType: string // "cash", "online"
+  transactionType: "advance" | "refund" | "settlement" | "deposit" // Type of financial transaction
   sendWhatsappNotification: boolean
   paymentDate: string
   through?: string // Added 'through' field here
@@ -200,7 +203,7 @@ const paymentSchema = yup
       .positive("Must be positive")
       .required("Amount is required"),
     paymentType: yup.string().required("Payment Type is required"),
-    type: yup.string().oneOf(["advance", "refund"]).required("Type is required"),
+    transactionType: yup.string().oneOf(["advance", "refund", "settlement", "deposit"]).required("Type is required"), // Updated
     sendWhatsappNotification: yup.boolean().required(),
     paymentDate: yup.string().required("Payment Date is required"),
     through: yup.string().when("paymentType", {
@@ -291,7 +294,7 @@ export default function BillingPage() {
     defaultValues: {
       paymentAmount: 0,
       paymentType: "cash",
-      type: "advance",
+      transactionType: "advance", // Default to 'advance'
       sendWhatsappNotification: false,
       paymentDate: format(new Date(), "yyyy-MM-dd"),
       through: "cash", // Default to 'cash' for 'cash' payment type
@@ -370,18 +373,22 @@ export default function BillingPage() {
       }
 
       console.log("Fetched IPD data:", data)
-      const payments = (data.payment_detail || []) as PaymentDetailItemSupabase[]
+      // Map payments to ensure amountType is present for existing records
+      const payments = (data.payment_detail || []).map(p => ({
+        ...p,
+        amountType: p.amountType || p.transactionType, // Default to transactionType if amountType is missing
+      })) as PaymentDetailItemSupabase[]
       const services = (data.service_detail || []) as ServiceDetailItemSupabase[]
 
-      // Calculate totalDeposit and discount from payments array
+      // Calculate totalDeposit and discount from payments array using amountType
       let totalDeposit = 0
       let totalDiscount = 0
       payments.forEach((p) => {
-        if (p.type === "advance" || p.type === "deposit") {
+        if (p.amountType === "advance" || p.amountType === "deposit" || p.amountType === "settlement") {
           totalDeposit += p.amount
-        } else if (p.type === "refund") {
+        } else if (p.amountType === "refund") {
           totalDeposit -= p.amount
-        } else if (p.type === "discount") {
+        } else if (p.amountType === "discount") {
           totalDiscount += p.amount
         }
       })
@@ -406,12 +413,13 @@ export default function BillingPage() {
         bedNumber: data.bed_management?.bed_number || null,
         bedType: data.bed_management?.bed_type || null,
         services: services,
-        payments: payments,
+        payments: payments, // Use the mapped payments
         discount: totalDiscount,
         admitDate: data.admission_date || null,
         admissionTime: data.admission_time || null,
         createdAt: data.created_at,
         doctor: data.under_care_of_doctor || null, // This is a string (doctor's name) from DB
+        billNumber: data.billno ?? null, // <-- Add this line
       }
       setSelectedRecord(processedRecord)
       console.log("setSelectedRecord called with:", processedRecord)
@@ -543,7 +551,7 @@ export default function BillingPage() {
   const discountVal = selectedRecord?.discount || 0
   const totalBill = hospitalServiceTotal + consultantChargeTotal - discountVal
   const totalRefunds = selectedRecord
-    ? selectedRecord.payments.filter((p) => p.type === "refund").reduce((sum, p) => sum + p.amount, 0)
+    ? selectedRecord.payments.filter((p) => p.amountType === "refund").reduce((sum, p) => sum + p.amount, 0)
     : 0
   const balanceAmount = totalBill - (selectedRecord?.totalDeposit || 0)
   const discountPercentage =
@@ -595,13 +603,13 @@ export default function BillingPage() {
     patientName: string,
     paymentAmount: number,
     updatedDeposit: number,
-    paymentType: "advance" | "refund" | "deposit",
+    amountType: "advance" | "refund" | "deposit" | "settlement", // Corrected type for notification
   ) => {
     const apiUrl = "https://wa.medblisss.com/send-text"
     let message = ""
-    if (paymentType === "advance") {
+    if (amountType === "advance" || amountType === "deposit" || amountType === "settlement") {
       message = `Dear ${patientName}, your payment of Rs ${paymentAmount.toLocaleString()} has been successfully added to your account. Your updated total deposit is Rs ${updatedDeposit.toLocaleString()}. Thank you for choosing our service.`
-    } else {
+    } else if (amountType === "refund") {
       message = `Dear ${patientName}, a refund of Rs ${paymentAmount.toLocaleString()} has been processed to your account. Your updated total deposit is Rs ${updatedDeposit.toLocaleString()}.`
     }
     const payload = { token: "99583991573", number: `91${patientMobile}`, message }
@@ -615,7 +623,7 @@ export default function BillingPage() {
     } catch (error) {
       console.error("Error sending notification:", error)
     }
-    console.log(`[MOCK] Sending WhatsApp notification for ${patientName}: Amount ${paymentAmount}, Type ${paymentType}`)
+    console.log(`[MOCK] Sending WhatsApp notification for ${patientName}: Amount ${paymentAmount}, Type ${amountType}`)
   }
 
   // --- Handlers ---
@@ -713,7 +721,8 @@ export default function BillingPage() {
         id: crypto.randomUUID(),
         amount: Number(formData.paymentAmount),
         paymentType: formData.paymentType,
-        type: formData.type,
+        transactionType: formData.transactionType, // Use the selected transaction type
+        amountType: formData.transactionType, // Set amountType based on transactionType
         date: isoDate,
         createdAt: isoDate,
         through: formData.through, // Save 'through' field
@@ -724,11 +733,11 @@ export default function BillingPage() {
       let updatedTotalDeposit = 0
       let updatedTotalDiscount = 0
       updatedPayments.forEach((p) => {
-        if (p.type === "advance" || p.type === "deposit") {
+        if (p.amountType === "advance" || p.amountType === "deposit" || p.amountType === "settlement") {
           updatedTotalDeposit += p.amount
-        } else if (p.type === "refund") {
+        } else if (p.amountType === "refund") {
           updatedTotalDeposit -= p.amount
-        } else if (p.type === "discount") {
+        } else if (p.amountType === "discount") {
           updatedTotalDiscount += p.amount
         }
       })
@@ -746,7 +755,7 @@ export default function BillingPage() {
           selectedRecord.name,
           newPayment.amount,
           updatedTotalDeposit,
-          newPayment.type === "discount" ? "advance" : newPayment.type, // Corrected type for notification
+          newPayment.amountType as "advance" | "refund" | "deposit" | "settlement", // Cast for notification type
         )
       }
 
@@ -764,7 +773,7 @@ export default function BillingPage() {
       resetPayment({
         paymentAmount: 0,
         paymentType: "cash",
-        type: "advance",
+        transactionType: "advance", // Reset to 'advance'
         sendWhatsappNotification: false,
         paymentDate: format(new Date(), "yyyy-MM-dd"),
         through: "cash", // Reset to 'cash' after submission
@@ -788,7 +797,7 @@ export default function BillingPage() {
     try {
       const discountValue = Number(formData.discountAmount)
 
-      const paymentsWithoutPreviousDiscounts = selectedRecord.payments.filter((p) => p.type !== "discount")
+      const paymentsWithoutPreviousDiscounts = selectedRecord.payments.filter((p) => p.amountType !== "discount")
 
       const now = new Date()
       const isoDate = now.toISOString()
@@ -796,8 +805,9 @@ export default function BillingPage() {
       const newDiscountEntry: PaymentDetailItemSupabase = {
         id: crypto.randomUUID(),
         amount: discountValue,
-        paymentType: "bill_reduction",
-        type: "discount",
+        paymentType: "bill_reduction", // This can be a fixed string for discounts
+        transactionType: "discount",
+        amountType: "discount", // Explicitly set amountType for discount
         date: isoDate,
         createdAt: isoDate,
       }
@@ -807,11 +817,11 @@ export default function BillingPage() {
       let updatedTotalDeposit = 0
       let updatedTotalDiscount = 0
       updatedPayments.forEach((p) => {
-        if (p.type === "advance" || p.type === "deposit") {
+        if (p.amountType === "advance" || p.amountType === "deposit" || p.amountType === "settlement") {
           updatedTotalDeposit += p.amount
-        } else if (p.type === "refund") {
+        } else if (p.amountType === "refund") {
           updatedTotalDeposit -= p.amount
-        } else if (p.type === "discount") {
+        } else if (p.amountType === "discount") {
           updatedTotalDiscount += p.amount
         }
       })
@@ -917,7 +927,7 @@ export default function BillingPage() {
   const handleDeletePayment = async (
     paymentId: string,
     paymentAmount: number,
-    paymentType: "advance" | "refund" | "deposit" | "discount", // Corrected type
+    amountType: "advance" | "refund" | "deposit" | "discount" | "settlement", // Corrected type
   ) => {
     if (!selectedRecord) return
     setLoading(true)
@@ -927,11 +937,11 @@ export default function BillingPage() {
       let updatedTotalDeposit = 0
       let updatedTotalDiscount = 0
       updatedPayments.forEach((p) => {
-        if (p.type === "advance" || p.type === "deposit") {
+        if (p.amountType === "advance" || p.amountType === "deposit" || p.amountType === "settlement") {
           updatedTotalDeposit += p.amount
-        } else if (p.type === "refund") {
+        } else if (p.amountType === "refund") {
           updatedTotalDeposit -= p.amount
-        } else if (p.type === "discount") {
+        } else if (p.amountType === "discount") {
           updatedTotalDiscount += p.amount
         }
       })
@@ -1293,7 +1303,16 @@ export default function BillingPage() {
                     <h3 className="text-lg font-semibold text-gray-800 mb-3">Quick Actions</h3>
                     <div className="space-y-3">
                       {/* Preview Bill */}
-                      <InvoiceDownload record={selectedRecord} beds={beds} doctors={doctors}>
+                      <InvoiceDownload
+                        record={{
+                          ...selectedRecord,
+                          payments: (selectedRecord.payments ?? []).filter(
+                            (p): p is Exclude<typeof p, undefined> => p !== undefined
+                          ) as any // Cast to any to satisfy InvoiceDownload's prop type
+                        }}
+                        beds={beds}
+                        doctors={doctors}
+                      >
                         <button
                           type="button"
                           className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
@@ -1795,7 +1814,7 @@ export default function BillingPage() {
                                     {payment.amount.toLocaleString()}
                                   </td>
                                   <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.type}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.amountType}</td>
                                   <td className="px-4 py-3 text-sm text-gray-900 capitalize">
                                     {payment.through || "N/A"}
                                   </td>{/* Display 'through' */}
@@ -1805,7 +1824,8 @@ export default function BillingPage() {
                                   <td className="px-4 py-3 text-sm text-center">
                                     <button
                                       onClick={() =>
-                                        payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
+                                        payment.id && payment.amountType &&
+                                        handleDeletePayment(payment.id, payment.amount, payment.amountType)
                                       }
                                       className="text-red-500 hover:text-red-700 transition-colors"
                                       title="Delete payment"
@@ -1878,16 +1898,18 @@ export default function BillingPage() {
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
                             <select
-                              {...registerPayment("type")}
+                              {...registerPayment("transactionType")} // Changed to transactionType
                               className={`w-full px-3 py-2 rounded-lg border ${
-                                errorsPayment.type ? "border-red-500" : "border-gray-300"
+                                errorsPayment.transactionType ? "border-red-500" : "border-gray-300"
                               } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                             >
                               <option value="advance">Advance</option>
+                              <option value="deposit">Deposit</option>
+                              <option value="settlement">Settlement</option>
                               <option value="refund">Refund</option>
                             </select>
-                            {errorsPayment.type && (
-                              <p className="text-red-500 text-xs mt-1">{errorsPayment.type.message}</p>
+                            {errorsPayment.transactionType && (
+                              <p className="text-red-500 text-xs mt-1">{errorsPayment.transactionType.message}</p>
                             )}
                           </div>
                           <div>
@@ -1907,23 +1929,6 @@ export default function BillingPage() {
                                 {errorsPayment.sendWhatsappNotification.message}
                               </p>
                             )}
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date</label>
-                            <input
-                              type="date"
-                              {...registerPayment("paymentDate")}
-                              className={`w-full px-3 py-2 rounded-lg border ${
-                                errorsPayment.paymentDate ? "border-red-500" : "border-gray-300"
-                              } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                              defaultValue={format(new Date(), "yyyy-MM-dd")}
-                            />
-                            {errorsPayment.paymentDate && (
-                              <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentDate.message}</p>
-                            )}
-                            <p className="text-xs text-gray-500 mt-1">
-                              Time will be set to current time automatically.
-                            </p>
                           </div>
                           <button
                             type="submit"
@@ -2220,7 +2225,7 @@ export default function BillingPage() {
                               {payment.amount.toLocaleString()}
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.type}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.amountType}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">
                               {payment.through || "N/A"}
                             </td>{/* Display 'through' in Modal */}
@@ -2230,7 +2235,8 @@ export default function BillingPage() {
                             <td className="px-4 py-3 text-sm text-center">
                               <button
                                 onClick={() =>
-                                  payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
+                                  payment.id && payment.amountType &&
+                                  handleDeletePayment(payment.id, payment.amount, payment.amountType)
                                 }
                                 className="text-red-500 hover:text-red-700 transition-colors"
                                 title="Delete payment"

@@ -27,6 +27,7 @@ interface PaymentDetailItemSupabase {
   paymentType: string
   type: "advance" | "refund" | "deposit" | "discount"
   through?: string
+  amountType?: string // Added for new logic
 }
 
 interface ServiceDetailItemSupabase {
@@ -111,10 +112,31 @@ const IpdHistoryModal: React.FC<IpdHistoryModalProps> = ({ isOpen, onClose, reco
   const consultantChargeItems = record.services.filter((s) => s.type === "doctorvisit") || []
   const consultantChargeTotal = consultantChargeItems.reduce((sum, s) => sum + s.amount, 0)
 
-  const discountVal = record.discount || 0
+  // Calculate totalDeposit and totalRefunds using amountType as primary, fallback to type
+  const totalDeposit = record.payments.filter(
+    (p) =>
+      (p.amountType?.toLowerCase?.() === "advance" ||
+        p.amountType?.toLowerCase?.() === "deposit" ||
+        p.amountType?.toLowerCase?.() === "settlement" ||
+        p.type?.toLowerCase?.() === "advance" ||
+        p.type?.toLowerCase?.() === "deposit" ||
+        p.type?.toLowerCase?.() === "settlement")
+  ).reduce((sum, p) => sum + p.amount, 0)
+
+  const totalRefunds = record.payments.filter(
+    (p) =>
+      p.amountType?.toLowerCase?.() === "refund" ||
+      p.type?.toLowerCase?.() === "refund"
+  ).reduce((sum, p) => sum + p.amount, 0)
+
+  const discountVal = record.payments.filter(
+    (p) =>
+      p.amountType?.toLowerCase?.() === "discount" ||
+      p.type?.toLowerCase?.() === "discount"
+  ).reduce((sum, p) => sum + p.amount, 0)
+
   const totalBill = hospitalServiceTotal + consultantChargeTotal - discountVal
-  const totalRefunds = record.payments.filter((p) => p.type === "refund").reduce((sum, p) => sum + p.amount, 0)
-  const balanceAmount = totalBill - record.totalDeposit
+  const balanceAmount = totalBill - totalDeposit
 
   const aggregatedConsultantCharges = consultantChargeItems.reduce(
     (acc, item) => {
@@ -297,7 +319,7 @@ const IpdHistoryModal: React.FC<IpdHistoryModalProps> = ({ isOpen, onClose, reco
                           </div>
                           <div className="flex justify-between mt-1">
                             <span className="text-gray-600">Total Payments Received:</span>
-                            <span className="font-medium">₹{record.totalDeposit.toLocaleString()}</span>
+                            <span className="font-medium">₹{totalDeposit.toLocaleString()}</span>
                           </div>
                           {totalRefunds > 0 && (
                             <div className="flex justify-between text-blue-600">

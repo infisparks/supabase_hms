@@ -309,7 +309,8 @@ export default function DischargeSummaryPage() {
     }
     setSaving(true);
     try {
-      const now = new Date().toISOString();
+      // Use local time string instead of UTC ISO string
+      const now = format(new Date(), "yyyy-MM-dd HH:mm:ss");
       const payload: DischargeSummarySupabase = {
         ipd_id: parseInt(patientRecord.ipdId),
         patient_id: patientRecord.patientId,
@@ -386,7 +387,8 @@ export default function DischargeSummaryPage() {
     setLoading(true); // Use loading for the final discharge process
     setShowDischargeModal(false); // Close the modal
     try {
-      const now = new Date().toISOString();
+      // Use local time string instead of UTC ISO string
+      const now = format(new Date(), "yyyy-MM-dd HH:mm:ss");
 
       // 1. Update discharge_date in ipd_registration
       // If it's a final discharge or death, set the current time.

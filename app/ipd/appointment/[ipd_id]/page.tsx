@@ -68,6 +68,7 @@ interface PaymentDetailItem {
   amount: number;
   createdAt: string;
   paymentType: string;
+  through: string; // Changed to required string to match PDF interface
 }
 
 interface ServiceDetailItem {
@@ -96,6 +97,7 @@ interface IPDFormInput {
   underCareOfDoctor: string;
   depositAmount: string | number | null; // Use string | number for form state, convert to number for DB
   paymentMode: string;
+  paymentThrough: string; // New field for payment through
   bed: number | null; // Changed to number | null to match BedData.id and DB
   roomType: string;
   date: string;
@@ -111,7 +113,7 @@ interface IPDRegistrationSupabaseFetch {
   admission_source: string | null;
   admission_type: string | null;
   under_care_of_doctor: string | null;
-  payment_detail: PaymentDetailItem[] | null;
+  payment_detail: PaymentDetailItem[] | null; // Now includes 'through'
   bed_id: number | null;
   service_detail: ServiceDetailItem[] | null;
   created_at: string;
@@ -164,6 +166,20 @@ const paymentModeOptions: Option[] = [
   { value: "online", label: "Online" },
   { value: "mixed", label: "Cash + Online" },
 ]
+
+// New options for payment 'through'
+const paymentThroughCashOptions: Option[] = [
+  { value: "cash", label: "Cash" },
+  { value: "online", label: "Online (for Mixed)" }, // Clarified label for mixed scenario
+];
+
+const paymentThroughOnlineOptions: Option[] = [
+  { value: "upi", label: "UPI" },
+  { value: "credit-card", label: "Credit Card" },
+  { value: "debit-card", label: "Debit Card" },
+  { value: "netbanking", label: "Net Banking" },
+  { value: "cheque", label: "Cheque" },
+];
 
 const roomTypeOptions: Option[] = [
   { value: "casualty", label: "Casualty" },
@@ -223,6 +239,7 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
     underCareOfDoctor: "",
     depositAmount: "",
     paymentMode: "",
+    paymentThrough: "", // Initialize paymentThrough
     roomType: "",
     bed: null,
     date: new Date().toISOString().split("T")[0],
@@ -230,6 +247,28 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
     paymentDetails: [],
     serviceDetails: [],
   })
+
+  // Determine available 'Through' options based on paymentMode
+  const currentPaymentThroughOptions = useMemo(() => {
+    if (formData.paymentMode === "cash" || formData.paymentMode === "mixed") {
+      return paymentThroughCashOptions;
+    } else if (formData.paymentMode === "online") {
+      return paymentThroughOnlineOptions;
+    }
+    return [];
+  }, [formData.paymentMode]);
+
+  useEffect(() => {
+    // Reset paymentThrough when paymentMode changes to a default for that mode
+    if (formData.paymentMode === "cash" || formData.paymentMode === "mixed") {
+      setFormData((prev) => ({ ...prev, paymentThrough: "cash" }));
+    } else if (formData.paymentMode === "online") {
+      setFormData((prev) => ({ ...prev, paymentThrough: "upi" })); // Default to UPI for online
+    } else {
+      setFormData((prev) => ({ ...prev, paymentThrough: "" })); // Clear if no specific mode
+    }
+  }, [formData.paymentMode]);
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -247,7 +286,7 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
     if (formData.roomType) {
       // Filter available beds for the selected room type. If formData.bed is set and matches, include it too.
       const roomBeds = beds.filter((bed) => {
-          return bed.room_type === formData.roomType && 
+          return bed.room_type === formData.roomType &&
                  (bed.status === "available" || bed.id === formData.bed); // Include current bed even if occupied
       });
       setAvailableBeds(roomBeds);
@@ -290,6 +329,7 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
           underCareOfDoctor: data.under_care_of_doctor || "",
           depositAmount: depositPayment?.amount ? String(depositPayment.amount) : "",
           paymentMode: depositPayment?.paymentType || "cash",
+          paymentThrough: depositPayment?.through || (depositPayment?.paymentType === "online" ? "upi" : "cash"), // Set 'through'
           roomType: data.bed_management?.room_type || "",
           bed: data.bed_id || null, // This is now a number directly
           date: data.admission_date || new Date().toISOString().split("T")[0],
@@ -440,6 +480,7 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
           amount: depositAmount,
           createdAt: new Date().toISOString(),
           paymentType: formData.paymentMode,
+          through: formData.paymentThrough, // Save the 'through' value
         });
       }
 
@@ -859,6 +900,19 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
                   />
                 </div>
 
+                {/* New "Through" dropdown, visible only if depositAmount > 0 */}
+                {Number(formData.depositAmount) > 0 && (
+                  <div className="space-y-2">
+                    <Label>Through</Label>
+                    <SearchableSelect
+                      options={currentPaymentThroughOptions}
+                      value={formData.paymentThrough}
+                      onValueChange={(value) => setFormData((prev: IPDFormInput) => ({ ...prev, paymentThrough: value }))}
+                      placeholder="Select payment method"
+                    />
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="date">Admission Date</Label>
                   <Input
@@ -1131,12 +1185,20 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
                     </div>
                   )}
                   {Number(formData.depositAmount) > 0 && (
-                    <div className="bg-white p-3 rounded-md shadow-sm">
-                      <span className="font-medium text-gray-500">Payment:</span>
-                      <p className="font-semibold mt-1">
-                        {paymentModeOptions.find((p) => p.value === formData.paymentMode)?.label}
-                      </p>
-                    </div>
+                    <>
+                      <div className="bg-white p-3 rounded-md shadow-sm">
+                        <span className="font-medium text-gray-500">Payment Mode:</span>
+                        <p className="font-semibold mt-1">
+                          {paymentModeOptions.find((p) => p.value === formData.paymentMode)?.label}
+                        </p>
+                      </div>
+                      <div className="bg-white p-3 rounded-md shadow-sm">
+                        <span className="font-medium text-gray-500">Payment Through:</span>
+                        <p className="font-semibold mt-1">
+                          {currentPaymentThroughOptions.find((p) => p.value === formData.paymentThrough)?.label}
+                        </p>
+                      </div>
+                    </>
                   )}
                   <div className="bg-white p-3 rounded-md shadow-sm">
                     <span className="font-medium text-gray-500">Date:</span>
@@ -1188,7 +1250,10 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
                   roomType: formData.roomType,
                   date: formData.date,
                   time: formData.time,
-                  paymentDetails: formData.paymentDetails,
+                  paymentDetails: formData.paymentDetails?.map(payment => ({
+                    ...payment,
+                    through: payment.through || "cash" // Ensure through always has a value
+                  })) || null,
                   serviceDetails: formData.serviceDetails,
                 }}
                 genderOptions={genderOptions}

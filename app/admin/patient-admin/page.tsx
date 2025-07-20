@@ -53,9 +53,9 @@ const COLORS = [
   "from-emerald-100 to-green-200",
 ]
 const BOX_ICONS = [
-  <Users className="h-7 w-7 text-sky-600" />, // Today
-  <CalendarDays className="h-7 w-7 text-orange-600" />, // Week
-  <BarChart2 className="h-7 w-7 text-emerald-600" />, // Month
+  <Users key="today" className="h-7 w-7 text-sky-600" />, // Today
+  <CalendarDays key="week" className="h-7 w-7 text-orange-600" />, // Week
+  <BarChart2 key="month" className="h-7 w-7 text-emerald-600" />, // Month
 ]
 const FILTERS = [
   { key: "today", label: "Today" },
@@ -119,7 +119,7 @@ const PatientAdminPage = () => {
         (p) =>
           p.name.toLowerCase().includes(q) ||
           p.uhid.toLowerCase().includes(q) ||
-          (p.number && String(p.number).includes(q)) // FIX: always string
+          (p.number && String(p.number).includes(q))
       )
     }
     if (filter === "today") {
@@ -248,7 +248,7 @@ const PatientAdminPage = () => {
         {/* Stats Boxes */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
           {stats.map((v, i) => (
-            <Card key={i} className={`shadow-lg border-0 bg-gradient-to-br ${COLORS[i]} text-gray-900`}>
+            <Card key={FILTERS[i].key} className={`shadow-lg border-0 bg-gradient-to-br ${COLORS[i]} text-gray-900`}>
               <CardContent className="flex items-center justify-between p-6">
                 <div>
                   <div className="text-2xl font-bold">{v}</div>
