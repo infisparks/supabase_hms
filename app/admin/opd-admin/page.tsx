@@ -35,6 +35,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { supabase } from "@/lib/supabase"
+import { useUser } from '@/components/global/UserContext';
+import { useRouter } from 'next/navigation';
 
 interface IModality {
   charges: number
@@ -100,10 +102,22 @@ interface DashboardStats {
 
 type DateFilter = "today" | "7days"
 
-const AdminDashboardPage: React.FC = () => {
+export default function Page() {
+  const { role, loading } = useUser();
+  const router = useRouter();
+  useEffect(() => {
+    if (!loading) {
+      if (!role) {
+        router.replace('/unknown');
+      } else if (role === 'opd-ipd') {
+        router.replace('/opd/appointment');
+      }
+    }
+  }, [role, loading, router]);
+
   const [dateFilter, setDateFilter] = useState<DateFilter>("7days")
   const [opdAppointments, setOpdAppointments] = useState<IOPDEntry[]>([])
-  const [loading, setLoading] = useState(true)
+  const [localLoading, setLocalLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [selectedAppointment, setSelectedAppointment] = useState<IOPDEntry | null>(null)
@@ -145,7 +159,7 @@ const AdminDashboardPage: React.FC = () => {
 
   const fetchOPDAppointments = useCallback(
     async (filter: DateFilter) => {
-      const isRefresh = !loading
+      const isRefresh = !localLoading
       if (isRefresh) setRefreshing(true)
 
       try {
@@ -222,11 +236,11 @@ const AdminDashboardPage: React.FC = () => {
         console.error("Error fetching OPD appointments:", error)
         toast.error("Failed to load appointments")
       } finally {
-        setLoading(false)
+        setLocalLoading(false)
         if (isRefresh) setRefreshing(false)
       }
     },
-    [getDateRange, loading],
+    [getDateRange, localLoading],
   )
 
   useEffect(() => {
@@ -387,7 +401,7 @@ const AdminDashboardPage: React.FC = () => {
     fetchOPDAppointments(dateFilter)
   }
 
-  if (loading) {
+  if (localLoading) {
     return (
       <Layout>
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
@@ -866,5 +880,3 @@ const AdminDashboardPage: React.FC = () => {
     </Layout>
   )
 }
-
-export default AdminDashboardPage

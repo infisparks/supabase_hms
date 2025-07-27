@@ -28,12 +28,14 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
+import { useUser } from './UserContext';
 
 const Sidebar = () => {
   const [isOpen, setIsOpen] = useState(false)
   const [expandedMenus, setExpandedMenus] = useState<string[]>([])
   const pathname = usePathname()
   const router = useRouter()
+  const { role, loading } = useUser();
 
   const toggleSidebar = () => setIsOpen(!isOpen)
 
@@ -102,6 +104,14 @@ const Sidebar = () => {
     // },
   ]
 
+  // Filter menuItems based on role
+  let filteredMenuItems = menuItems;
+  if (role === 'opd-ipd') {
+    filteredMenuItems = menuItems.filter(item =>
+      item.title === 'OPD' || item.title === 'IPD'
+    );
+  }
+
   return (
     <>
       {/* Mobile overlay */}
@@ -153,7 +163,7 @@ const Sidebar = () => {
         <ScrollArea className="flex-1 h-[calc(100vh-140px)]">
           <nav className="py-4">
             <ul className="space-y-1 px-3">
-              {menuItems.map((item) => (
+              {filteredMenuItems.map((item) => (
                 <li key={item.title}>
                   {item.submenu ? (
                     <div>

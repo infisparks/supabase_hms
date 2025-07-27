@@ -55,6 +55,9 @@ ChartJS.register(
   PointElement
 );
 
+import { useUser } from '@/components/global/UserContext';
+import { useRouter } from 'next/navigation';
+
 
 // --- Timezone Management (Simplified for 'timestamp without time zone' columns) ---
 
@@ -112,7 +115,19 @@ interface Alert {
   message: string;
 }
 
-const DPRPage = () => {
+export default function Page() {
+  const { role, loading } = useUser();
+  const router = useRouter();
+  useEffect(() => {
+    if (!loading) {
+      if (!role) {
+        router.replace('/unknown');
+      } else if (role === 'opd-ipd') {
+        router.replace('/opd/appointment');
+      }
+    }
+  }, [role, loading, router]);
+
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [isLoading, setIsLoading] = useState(false);
@@ -1049,5 +1064,3 @@ const DPRPage = () => {
     </Layout>
   )
 }
-
-export default DPRPage

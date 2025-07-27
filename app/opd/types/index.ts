@@ -173,12 +173,8 @@ export const CashThroughOptions = [{ value: "cash", label: "Cash" }]
 
 // Specific service lists
 export const CardiologyStudyOptions: ServiceOption[] = [
-  { service: "ECG", amount: 300 },
-  { service: "ECHO Cardiography", amount: 1500 },
-  { service: "TMT", amount: 2000 },
-  { service: "Holter Monitoring", amount: 2500 },
-  { service: "Angiography", amount: 10000 },
-  { service: "Angioplasty", amount: 50000 },
+  { service: "2DECO", amount: 1800 },
+  { service: "2DECO WITH CONSULTATION", amount: 3500 },
 ]
 
 export const XRayStudyOptions: ServiceOption[] = [
