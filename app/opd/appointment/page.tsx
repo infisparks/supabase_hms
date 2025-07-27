@@ -42,6 +42,7 @@ import "react-datepicker/dist/react-datepicker.css"
 import EditableChargesInput from "@/components/ui/input-new" // Adjust path as needed
 // Import the new custom input component for service name
 import EditableServiceNameInput from "@/components/ui/input-servicename" // New import
+import { SearchableSelect } from "@/components/global/searchable-select"
 
 // Ensure correct paths to your types
 import {
@@ -1123,7 +1124,8 @@ const AppointmentPage = () => {
                                       <Label className="text-xs">
                                         Doctor <span className="text-red-500">*</span>
                                       </Label>
-                                      <Select
+                                      <SearchableSelect
+                                        options={doctors.map((doctor) => ({ value: doctor.id, label: doctor.dr_name }))}
                                         value={modality.doctorId || ""}
                                         onValueChange={(doctorId: string) => {
                                           const selectedDoctor = doctors.find((d) => d.id === doctorId);
@@ -1139,22 +1141,9 @@ const AppointmentPage = () => {
                                             updateModalityField(index, "visitType", "first"); // Default to first visit
                                           }
                                         }}
-                                      >
-                                        <SelectTrigger
-                                          className={`h-9 text-sm ${
-                                            errors.modalities?.[index]?.doctor ? "border-red-500" : ""
-                                          }`}
-                                        >
-                                          <SelectValue placeholder="Select doctor" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          {doctors.map((doctor) => (
-                                            <SelectItem key={doctor.id} value={doctor.id}>
-                                              {doctor.dr_name}
-                                            </SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
+                                        placeholder="Select doctor"
+                                        className={`h-9 text-sm ${errors.modalities?.[index]?.doctor ? "border-red-500" : ""}`}
+                                      />
                                       {errors.modalities?.[index]?.doctor && (
                                         <p className="text-sm text-red-500">
                                           {errors.modalities[index]?.doctor?.message}
@@ -1165,21 +1154,13 @@ const AppointmentPage = () => {
                                       <>
                                         <div className="space-y-2">
                                           <Label className="text-xs">Specialist</Label>
-                                          <Select
+                                          <SearchableSelect
+                                            options={Array.from(new Set(doctors.flatMap((d) => d.specialist))).map((spec) => ({ value: spec, label: spec }))}
                                             value={modality.specialist || ""}
                                             onValueChange={(value) => updateModalityField(index, "specialist", value)}
-                                          >
-                                            <SelectTrigger className="h-9 text-sm">
-                                              <SelectValue placeholder="Select specialist" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              {Array.from(new Set(doctors.flatMap((d) => d.specialist))).map((spec) => (
-                                                <SelectItem key={spec} value={spec}>
-                                                  {spec}
-                                                </SelectItem>
-                                              ))}
-                                            </SelectContent>
-                                          </Select>
+                                            placeholder="Select specialist"
+                                            className="h-9 text-sm"
+                                          />
                                           {errors.modalities?.[index]?.specialist && (
                                             <p className="text-sm text-red-500">
                                               {errors.modalities[index]?.specialist?.message}
@@ -1188,7 +1169,11 @@ const AppointmentPage = () => {
                                         </div>
                                         <div className="space-y-2">
                                           <Label className="text-xs">Visit Type</Label>
-                                          <Select
+                                          <SearchableSelect
+                                            options={[
+                                              { value: "first", label: "First Visit" },
+                                              { value: "followup", label: "Follow Up" },
+                                            ]}
                                             value={modality.visitType || ""}
                                             onValueChange={(value) => {
                                               const doctor = doctors.find((d) => d.dr_name === modality.doctor) // Find by name
@@ -1207,15 +1192,9 @@ const AppointmentPage = () => {
                                               updateModalityField(index, "visitType", value as "first" | "followup")
                                               updateModalityField(index, "charges", charges)
                                             }}
-                                          >
-                                            <SelectTrigger className="h-9 text-sm">
-                                              <SelectValue placeholder="Select visit type" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              <SelectItem value="first">First Visit</SelectItem>
-                                              <SelectItem value="followup">Follow Up</SelectItem>
-                                            </SelectContent>
-                                          </Select>
+                                            placeholder="Select visit type"
+                                            className="h-9 text-sm"
+                                          />
                                           {errors.modalities?.[index]?.visitType && (
                                             <p className="text-sm text-red-500">
                                               {errors.modalities[index]?.visitType?.message}
@@ -1245,7 +1224,8 @@ const AppointmentPage = () => {
                                         <Label className="text-xs">
                                           Service <span className="text-red-500">*</span>
                                         </Label>
-                                        <Select
+                                        <SearchableSelect
+                                          options={getServiceOptions(modality.type).map((service) => ({ value: service.service, label: `${service.service} - ₹${service.amount}` }))}
                                           value={modality.service || ""}
                                           onValueChange={(value) => {
                                             const serviceOptions = getServiceOptions(modality.type)
@@ -1253,18 +1233,9 @@ const AppointmentPage = () => {
                                             updateModalityField(index, "service", value)
                                             updateModalityField(index, "charges", selectedService?.amount || 0)
                                           }}
-                                        >
-                                          <SelectTrigger className="h-9 text-sm">
-                                            <SelectValue placeholder="Select service" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {getServiceOptions(modality.type).map((service) => (
-                                              <SelectItem key={service.service} value={service.service}>
-                                                {service.service} - ₹{service.amount}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
+                                          placeholder="Select service"
+                                          className="h-9 text-sm"
+                                        />
                                         {errors.modalities?.[index]?.service && (
                                           <p className="text-sm text-red-500">
                                             {errors.modalities[index]?.service?.message}

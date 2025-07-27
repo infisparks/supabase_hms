@@ -42,25 +42,37 @@ interface BedData {
   created_at: string
 }
 
-const roomTypeOptions = [
-  { value: "casualty", label: "Casualty" },
-  { value: "icu", label: "ICU" },
-  { value: "female", label: "Female" },
-  { value: "male", label: "Male" },
-  { value: "delux", label: "Delux" },
-  { value: "suit", label: "Suit" },
-  { value: "nicu", label: "NICU" },
-]
-
-const statusOptions = [
-  { value: "available", label: "Available" },
-  { value: "occupied", label: "Occupied" },
-  { value: "maintenance", label: "Maintenance" },
-  { value: "reserved", label: "Reserved" },
-]
-
 const BedManagementPage = () => {
   const [beds, setBeds] = useState<BedData[]>([])
+  const [roomTypeOptions, setRoomTypeOptions] = useState<{ value: string, label: string }[]>([])
+
+  // Fetch unique room types from the database
+  const fetchRoomTypes = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("bed_management")
+      .select("room_type")
+      .neq("room_type", null)
+    if (!error && data) {
+      // Get unique, non-empty room types
+      const uniqueTypes = Array.from(new Set(data.map((row) => row.room_type).filter(Boolean)))
+      setRoomTypeOptions(
+        uniqueTypes.map((type) => ({ value: type, label: type.charAt(0).toUpperCase() + type.slice(1) }))
+      )
+    }
+  }, [])
+
+  // Fetch room types on mount and after beds update
+  useEffect(() => {
+    fetchRoomTypes()
+  }, [fetchRoomTypes, beds])
+
+  const statusOptions = [
+    { value: "available", label: "Available" },
+    { value: "occupied", label: "Occupied" },
+    { value: "maintenance", label: "Maintenance" },
+    { value: "reserved", label: "Reserved" },
+  ]
+
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)

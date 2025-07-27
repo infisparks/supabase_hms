@@ -43,6 +43,7 @@ import {
 
 // Import the new custom input component
 import EditableChargesInput from "@/components/ui/input-new"; // Adjust path as needed
+import { SearchableSelect } from "@/components/global/searchable-select";
 
 // Type Definitions and Options
 import {
@@ -1103,26 +1104,16 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                       name={`modalities.${index}.doctor`}
                                       rules={{ required: "Doctor is required" }}
                                       render={({ field }) => (
-                                        <Select
+                                        <SearchableSelect
+                                          options={doctors.map((doctor) => ({ value: doctor.id, label: doctor.dr_name }))}
+                                          value={field.value || ""}
                                           onValueChange={(value) => {
                                             field.onChange(value)
                                             updateModality(index, { doctor: value })
                                           }}
-                                          value={field.value || ""}
-                                        >
-                                          <SelectTrigger
-                                            className={`h-8 text-xs ${errors.modalities?.[index]?.doctor ? "border-red-500" : ""}`}
-                                          >
-                                            <SelectValue placeholder="Select doctor" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {doctors.map((doctor) => (
-                                              <SelectItem key={doctor.id} value={doctor.id}>
-                                                {doctor.dr_name}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
+                                          placeholder="Select doctor"
+                                          className={`h-8 text-xs ${errors.modalities?.[index]?.doctor ? "border-red-500" : ""}`}
+                                        />
                                       )}
                                     />
                                     {errors.modalities?.[index]?.doctor && (
@@ -1131,7 +1122,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                       </p>
                                     )}
                                   </div>
-
                                   {modality.type === "consultation" ? (
                                     <>
                                       <div className="space-y-2">
@@ -1140,43 +1130,13 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                           control={control}
                                           name={`modalities.${index}.specialist`}
                                           render={({ field }) => (
-                                            <Select
-                                              onValueChange={(value) => {
-                                                const doctorId = watch(`modalities.${index}.doctor`)
-                                                const doctor = doctors.find((d) => d.id === doctorId)
-                                                let charges = 0
-                                                if (doctor?.charges?.[0]) {
-                                                  const chargeData = doctor.charges[0]
-                                                  if (value === "first" && chargeData.firstVisitCharge !== undefined) {
-                                                    charges = chargeData.firstVisitCharge
-                                                  } else if (
-                                                    value === "followup" &&
-                                                    chargeData.followUpCharge !== undefined
-                                                  ) {
-                                                    charges = chargeData.followUpCharge
-                                                  }
-                                                }
-                                                field.onChange(value)
-                                                updateModality(index, {
-                                                  visitType: value as "first" | "followup",
-                                                  charges,
-                                                })
-                                              }}
+                                            <SearchableSelect
+                                              options={Array.from(new Set(doctors.flatMap((d) => d.specialist))).map((spec) => ({ value: spec, label: spec }))}
                                               value={field.value || ""}
-                                            >
-                                              <SelectTrigger className="h-8 text-xs">
-                                                <SelectValue placeholder="Select specialist" />
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                {Array.from(new Set(doctors.flatMap((d) => d.specialist))).map(
-                                                  (spec) => (
-                                                    <SelectItem key={spec} value={spec}>
-                                                      {spec}
-                                                    </SelectItem>
-                                                  ),
-                                                )}
-                                              </SelectContent>
-                                            </Select>
+                                              onValueChange={(value) => field.onChange(value)}
+                                              placeholder="Select specialist"
+                                              className="h-8 text-xs"
+                                            />
                                           )}
                                         />
                                         {errors.modalities?.[index]?.specialist && (
@@ -1191,7 +1151,12 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                           control={control}
                                           name={`modalities.${index}.visitType`}
                                           render={({ field }) => (
-                                            <Select
+                                            <SearchableSelect
+                                              options={[
+                                                { value: "first", label: "First Visit" },
+                                                { value: "followup", label: "Follow Up" },
+                                              ]}
+                                              value={field.value || ""}
                                               onValueChange={(value) => {
                                                 const doctorId = watch(`modalities.${index}.doctor`)
                                                 const doctor = doctors.find((d) => d.id === doctorId)
@@ -1213,16 +1178,9 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                                   charges,
                                                 })
                                               }}
-                                              value={field.value || ""}
-                                            >
-                                              <SelectTrigger className="h-8 text-xs">
-                                                <SelectValue placeholder="Select visit type" />
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                <SelectItem value="first">First Visit</SelectItem>
-                                                <SelectItem value="followup">Follow Up</SelectItem>
-                                              </SelectContent>
-                                            </Select>
+                                              placeholder="Select visit type"
+                                              className="h-8 text-xs"
+                                            />
                                           )}
                                         />
                                         {errors.modalities?.[index]?.visitType && (
@@ -1266,7 +1224,9 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                         name={`modalities.${index}.service`}
                                         rules={{ required: "Service is required" }}
                                         render={({ field }) => (
-                                          <Select
+                                          <SearchableSelect
+                                            options={getServiceOptions(modality.type).map((service) => ({ value: service.service, label: `${service.service} - ₹${service.amount}` }))}
+                                            value={field.value || ""}
                                             onValueChange={(value) => {
                                               const serviceOptions = getServiceOptions(modality.type)
                                               const selectedService = serviceOptions.find((s) => s.service === value)
@@ -1276,19 +1236,9 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                                 charges: selectedService?.amount || 0,
                                               })
                                             }}
-                                            value={field.value || ""}
-                                          >
-                                            <SelectTrigger className="h-8 text-xs">
-                                              <SelectValue placeholder="Select service" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              {getServiceOptions(modality.type).map((service) => (
-                                                <SelectItem key={service.service} value={service.service}>
-                                                  {service.service} - ₹{service.amount}
-                                                </SelectItem>
-                                              ))}
-                                            </SelectContent>
-                                          </Select>
+                                            placeholder="Select service"
+                                            className="h-8 text-xs"
+                                          />
                                         )}
                                       />
                                       {errors.modalities?.[index]?.service && (

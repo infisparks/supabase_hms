@@ -142,6 +142,7 @@ interface IPDRegistrationSupabase {
   // These are re-added because fetchAllAppointmentsForPatient explicitly joins them
   bed_management?: { room_type: string }[] | null
   patient_detail?: PatientDetailFromSupabase[] | null
+  ipd_notes?: string | null;
 }
 
 // OT Details (from Supabase `ot_details` table)
@@ -202,6 +203,7 @@ interface IPDAppointmentDisplay {
   service_detail: IPDService[] | null
   created_at: string // original ISO string from DB
   bed_id: number | null
+  ipd_notes?: string | null;
 }
 
 interface OTAppointmentDisplay {
@@ -643,7 +645,8 @@ const DashboardPage: React.FC = () => {
             payment_detail,
             service_detail,
             created_at,
-            bed_id
+            bed_id,
+            ipd_notes
           `);
 
         // For today filter, use simple date comparison for admission_date
@@ -712,6 +715,7 @@ const DashboardPage: React.FC = () => {
               roomType: roomType || "N/A",
               admission_date: ipdRecord.admission_date, // Directly use from DB
               admission_time: ipdRecord.admission_time, // Directly use from DB
+              ipd_notes: ipdRecord.ipd_notes || null,
             }
           })
         );
@@ -1118,7 +1122,7 @@ const DashboardPage: React.FC = () => {
           .from("ipd_registration")
           .select(
             `
-              ipd_id, uhid, admission_date, admission_time, under_care_of_doctor, payment_detail, service_detail, created_at, bed_id
+              ipd_id, uhid, admission_date, admission_time, under_care_of_doctor, payment_detail, service_detail, created_at, bed_id, ipd_notes
             `,
           )
           .eq("uhid", uhid)
@@ -1180,6 +1184,7 @@ const DashboardPage: React.FC = () => {
             roomType: roomType || "N/A",
             admission_date: ipdRecord.admission_date, // Directly use from DB
             admission_time: ipdRecord.admission_time, // Directly use from DB
+            ipd_notes: ipdRecord.ipd_notes || null,
           }
         }))
         allPatientApps.push(...mappedIpd)
@@ -2278,6 +2283,12 @@ const DashboardPage: React.FC = () => {
                           </div>
                         </div>
                       </div>
+                      {selectedAppointment.type === "IPD" && (selectedAppointment as IPDAppointmentDisplay).ipd_notes && (
+                        <div className="mt-4 p-3 bg-white rounded-lg border border-orange-200 shadow-sm">
+                          <p className="text-sm text-gray-500">IPD Note</p>
+                          <p className="font-medium">{(selectedAppointment as IPDAppointmentDisplay).ipd_notes}</p>
+                        </div>
+                      )}
                     </div>
                   )}
                   {/* OT Details */}

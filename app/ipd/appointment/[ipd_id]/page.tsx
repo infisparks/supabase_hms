@@ -181,16 +181,6 @@ const paymentThroughOnlineOptions: Option[] = [
   { value: "cheque", label: "Cheque" },
 ];
 
-const roomTypeOptions: Option[] = [
-  { value: "casualty", label: "Casualty" },
-  { value: "icu", label: "ICU" },
-  { value: "nicu", label: "NICU" },
-  { value: "male", label: "Male Ward" },
-  { value: "female", label: "Female Ward" },
-  { value: "suit", label: "Suit" },
-  { value: "delux", label: "Delux" },
-]
-
 const genderOptions: Option[] = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
@@ -220,6 +210,28 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [originalBedId, setOriginalBedId] = useState<number | null>(null);
   const router = useRouter();
+
+  // Place these INSIDE the component:
+  const [roomTypeOptions, setRoomTypeOptions] = useState<Option[]>([]);
+
+  useEffect(() => {
+    const fetchRoomTypes = async () => {
+      const { data, error } = await supabase
+        .from("bed_management")
+        .select("room_type")
+        .neq("room_type", null);
+      if (!error && data) {
+        const uniqueTypes = Array.from(new Set(data.map((row) => row.room_type).filter(Boolean)));
+        setRoomTypeOptions(
+          uniqueTypes.map((type) => ({
+            value: type,
+            label: type.charAt(0).toUpperCase() + type.slice(1),
+          }))
+        );
+      }
+    };
+    fetchRoomTypes();
+  }, []);
 
   const [formData, setFormData] = useState<IPDFormInput>({
     ipd_id: Number(ipd_id),

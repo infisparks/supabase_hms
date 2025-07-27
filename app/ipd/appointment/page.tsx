@@ -127,16 +127,6 @@ const paymentModeOptions: Option[] = [
   { value: "mixed", label: "Cash + Online" }, // Consider if 'mixed' needs a 'through'
 ]
 
-const roomTypeOptions: Option[] = [
-  { value: "casualty", label: "Casualty" },
-  { value: "icu", label: "ICU" },
-  { value: "nicu", label: "NICU" },
-  { value: "male", label: "Male Ward" },
-  { value: "female", label: "Female Ward" },
-  { value: "suit", label: "Suit" },
-  { value: "delux", label: "Delux" },
-]
-
 const genderOptions: Option[] = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
@@ -206,6 +196,53 @@ const IPDAppointmentPage = () => {
       setFormData((prev) => ({ ...prev, through: null })); // Clear or set a default for online
     }
   }, [formData.paymentMode]);
+
+  // Place these INSIDE the component:
+  const [roomTypeOptions, setRoomTypeOptions] = useState<Option[]>([]);
+
+  useEffect(() => {
+    const fetchRoomTypes = async () => {
+      const { data, error } = await supabase
+        .from("bed_management")
+        .select("room_type")
+        .neq("room_type", null);
+      if (!error && data) {
+        const uniqueTypes = Array.from(new Set(data.map((row) => row.room_type).filter(Boolean)));
+        setRoomTypeOptions(
+          uniqueTypes.map((type) => ({
+            value: type,
+            label: type.charAt(0).toUpperCase() + type.slice(1),
+          }))
+        );
+      }
+    };
+    fetchRoomTypes();
+  }, []);
+
+  const genderOptions: Option[] = [
+    { value: "male", label: "Male" },
+    { value: "female", label: "Female" },
+    { value: "other", label: "Other" },
+  ]
+
+  const ageUnitOptions: Option[] = [
+    { value: "years", label: "Years" },
+    { value: "months", label: "Months" },
+    { value: "days", label: "Days" },
+  ]
+
+  // New options for 'Through' field
+  const onlineThroughOptions: Option[] = [
+    { value: "upi", label: "UPI" },
+    { value: "credit-card", label: "Credit Card" },
+    { value: "debit-card", label: "Debit Card" },
+    { value: "netbanking", label: "Net Banking" },
+    { value: "cheque", label: "Cheque" },
+  ]
+
+  const cashThroughOptions: Option[] = [
+    { value: "cash", label: "Cash" },
+  ];
 
 
   useEffect(() => {

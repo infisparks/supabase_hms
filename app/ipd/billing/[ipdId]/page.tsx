@@ -44,6 +44,9 @@ import { Dialog, Transition } from "@headlessui/react"
 // Import your placeholder components
 import InvoiceDownload from "./InvoiceDownload"
 import BulkServiceModal from "./bulk-service-modal"
+import PaymentTab from "./paymenttab"
+import ServiceTab from "./servicetab"
+import Notetab from "./Notetab"
 
 // Import shared types
 import { IDoctor, ParsedServiceItem } from "@/lib/shared-types" // Adjust path as needed
@@ -79,6 +82,7 @@ interface PaymentDetailItemSupabase {
   transactionType: "advance" | "refund" | "deposit" | "discount" | "settlement" // Renamed from 'type'
   amountType?: "advance" | "deposit" | "settlement" | "refund" | "discount" // New field for clearer categorization
   through?: string // Added 'through' field here
+  remark?: string // Optional remark for payment
 }
 
 interface ServiceDetailItemSupabase {
@@ -110,6 +114,7 @@ interface IPDRegistrationSupabaseJoined {
   patient_detail: PatientDetailSupabase | null
   bed_management: BedManagementSupabase | null
   billno?: number | null // <-- Add this line
+  ipd_notes?: string | null // Add ipd_notes field
 }
 
 // Consolidated BillingRecord for UI state, similar to your Firebase structure
@@ -140,6 +145,7 @@ export interface BillingRecord {
   createdAt?: string
   doctor?: string | null
   billNumber?: number | null // <-- Correct type
+  ipdNotes?: string | null // Add ipdNotes to BillingRecord
 }
 
 // MasterServiceOption - Now without is_consultant and doctor_id (as they are removed from DB)
@@ -163,6 +169,7 @@ interface PaymentForm {
   sendWhatsappNotification: boolean
   paymentDate: string
   through?: string // Added 'through' field here
+  remark?: string | null; // Optional remark for payment, can be string, undefined, or null
 }
 
 interface DiscountForm {
@@ -211,6 +218,7 @@ const paymentSchema = yup
       then: (schema) => schema.required("Through is required for online/card payments"),
       otherwise: (schema) => schema.notRequired(),
     }),
+    remark: yup.string().notRequired(), // Optional remark, only string or undefined
   })
   .required()
 
@@ -263,11 +271,13 @@ export default function BillingPage() {
   const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false)
   const [beds, setBeds] = useState<any>({}) // This is not used in this component, can be removed or typed properly if needed
   const [doctors, setDoctors] = useState<IDoctor[]>([]) // Using imported IDoctor
-  const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants">("overview")
+  const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants" | "note">("overview")
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false)
   const [discountUpdated, setDiscountUpdated] = useState(false)
   const [isBulkServiceModalOpen, setIsBulkServiceModalOpen] = useState(false)
   const [masterServiceOptions, setMasterServiceOptions] = useState<MasterServiceOption[]>([])
+  const [ipdNote, setIpdNote] = useState<string>("")
+  const [ipdNoteLoading, setIpdNoteLoading] = useState(false)
 
   // Forms
   const {
@@ -290,7 +300,7 @@ export default function BillingPage() {
     setValue: setValuePayment,
     watch: watchPayment,
   } = useForm<PaymentForm>({
-    resolver: yupResolver(paymentSchema),
+    resolver: yupResolver<PaymentForm>(paymentSchema),
     defaultValues: {
       paymentAmount: 0,
       paymentType: "cash",
@@ -298,6 +308,7 @@ export default function BillingPage() {
       sendWhatsappNotification: false,
       paymentDate: format(new Date(), "yyyy-MM-dd"),
       through: "cash", // Default to 'cash' for 'cash' payment type
+      remark: "",
     },
   })
 
@@ -420,9 +431,11 @@ export default function BillingPage() {
         createdAt: data.created_at,
         doctor: data.under_care_of_doctor || null, // This is a string (doctor's name) from DB
         billNumber: data.billno ?? null, // <-- Add this line
+        ipdNotes: data.ipd_notes || null, // Add ipdNotes to BillingRecord
       }
       setSelectedRecord(processedRecord)
       console.log("setSelectedRecord called with:", processedRecord)
+      setIpdNote(data.ipd_notes || "")
     } catch (error) {
       console.error("Error in fetchBillingData (catch block):", error)
       toast.error("Error loading billing details.")
@@ -726,6 +739,7 @@ export default function BillingPage() {
         date: isoDate,
         createdAt: isoDate,
         through: formData.through, // Save 'through' field
+        remark: formData.remark || "", // Always save as string
       }
 
       const updatedPayments = [...(selectedRecord.payments || []), newPayment]
@@ -777,6 +791,7 @@ export default function BillingPage() {
         sendWhatsappNotification: false,
         paymentDate: format(new Date(), "yyyy-MM-dd"),
         through: "cash", // Reset to 'cash' after submission
+        remark: "",
       })
     } catch (error) {
       console.error("Error recording payment:", error)
@@ -1382,6 +1397,16 @@ export default function BillingPage() {
                   >
                     <UserPlus size={16} className="mr-2" /> Consultants
                   </button>
+                  <button
+                    onClick={() => setActiveTab("note")}
+                    className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
+                      activeTab === "note"
+                        ? "border-teal-500 text-teal-600"
+                        : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                    }`}
+                  >
+                    <FileText size={16} className="mr-2" /> Note
+                  </button>
                 </nav>
               </div>
             </div>
@@ -1530,429 +1555,42 @@ export default function BillingPage() {
 
               {/* Services Tab */}
               {activeTab === "services" && (
-                <div className="p-6">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-2">
-                      <h3 className="text-xl font-semibold text-gray-800 mb-4">Hospital Services</h3>
-                      {groupedServiceItems.length === 0 ? (
-                        <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
-                          No hospital services recorded yet.
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
-                          <table className="w-full">
-                            <thead>
-                              <tr className="bg-gray-50">
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Service Name
-                                </th>
-                                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Qty
-                                </th>
-                                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Amount (₹)
-                                </th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Date/Time
-                                </th>
-                                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Action
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                              {groupedServiceItems.map((srv, idx) => (
-                                <tr key={idx} className="hover:bg-gray-50">
-                                  <td className="px-4 py-3 text-sm text-gray-900">{srv.serviceName}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-900 text-center">{srv.quantity}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-900 text-right">
-                                    {srv.amount.toLocaleString()}
-                                  </td>
-                                  <td className="px-4 py-3 text-sm text-gray-500">
-                                    {srv.createdAt ? new Date(srv.createdAt).toLocaleString() : "N/A"}
-                                  </td>
-                                  <td className="px-4 py-3 text-sm text-center">
-                                    <button
-                                      onClick={() => handleDeleteGroupedServiceItem(srv.serviceName, srv.amount)}
-                                      className="text-red-500 hover:text-red-700 transition-colors"
-                                      title="Delete all instances of this service"
-                                    >
-                                      <Trash size={16} />
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                            <tfoot>
-                              <tr className="bg-gray-50">
-                                <td className="px-4 py-3 text-sm font-medium">Total</td>
-                                <td></td>
-                                <td className="px-4 py-3 text-sm font-bold text-right">
-                                  ₹{hospitalServiceTotal.toLocaleString()}
-                                </td>
-                                <td colSpan={2}></td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Add Service Form */}
-                    <div className="lg:col-span-1">
-                      <div className="bg-white rounded-lg border border-gray-200 p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4">Add Hospital Service</h3>
-                        <form onSubmit={handleSubmitService(onSubmitAdditionalService)} className="space-y-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Service Name</label>
-                            <Controller
-                              control={serviceControl}
-                              name="serviceName"
-                              render={({ field }) => {
-                                const valueStr = field.value || ""
-                                const selectedOption = masterServiceOptions.find(
-                                  (opt) =>
-                                    typeof opt.label === "string" &&
-                                    typeof valueStr === "string" &&
-                                    opt.label.toLowerCase() === valueStr.toLowerCase(),
-                                ) || (valueStr ? { label: valueStr, value: valueStr, amount: 0 } : null) // Added amount to default
-                                return (
-                                  <CreatableSelect
-                                    {...field}
-                                    isClearable
-                                    options={masterServiceOptions}
-                                    placeholder="Select or type a service..."
-                                    onChange={(selected) => {
-                                      if (selected) {
-                                        field.onChange(selected.label)
-                                        const found = masterServiceOptions.find((opt) => opt.label === selected.label)
-                                        if (found) setValueService("amount", found.amount)
-                                      } else {
-                                        field.onChange("")
-                                        setValueService("amount", 0)
-                                      }
-                                    }}
-                                    value={selectedOption}
-                                  />
-                                )
-                              }}
-                            />
-                            {errorsService.serviceName && (
-                              <p className="text-red-500 text-xs mt-1">{errorsService.serviceName.message}</p>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₹)</label>
-                            <input
-                              type="number"
-                              {...registerService("amount")}
-                              placeholder="Auto-filled on selection, or type your own"
-                              className={`w-full px-3 py-2 rounded-lg border ${
-                                errorsService.amount ? "border-red-500" : "border-gray-300"
-                              } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                            />
-                            {errorsService.amount && (
-                              <p className="text-red-500 text-xs mt-1">{errorsService.amount.message}</p>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
-                            <input
-                              type="number"
-                              {...registerService("quantity")}
-                              min="1"
-                              placeholder="e.g., 1"
-                              className={`w-full px-3 py-2 rounded-lg border ${
-                                errorsService.quantity ? "border-red-500" : "border-gray-300"
-                              } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                            />
-                            {errorsService.quantity && (
-                              <p className="text-red-500 text-xs mt-1">{errorsService.quantity.message}</p>
-                            )}
-                          </div>
-                          <button
-                            type="submit"
-                            disabled={loading}
-                            className={`w-full py-2 px-4 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center ${
-                              loading ? "opacity-50 cursor-not-allowed" : ""
-                            }`}
-                          >
-                            {loading ? (
-                              "Processing..."
-                            ) : (
-                              <>
-                                <Plus size={16} className="mr-2" /> Add Service
-                              </>
-                            )}
-                          </button>
-                        </form>
-                      </div>
-
-                      {/* Enhanced Discount Card */}
-                      <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg border border-emerald-200 p-6 mt-6 shadow-sm">
-                        <h3 className="text-lg font-semibold text-emerald-800 mb-4 flex items-center">
-                          <Percent size={18} className="mr-2 text-emerald-600" /> Discount
-                        </h3>
-                        {discountVal > 0 ? (
-                          <div className="space-y-4">
-                            <div className="bg-white rounded-lg p-4 shadow-sm border border-emerald-100">
-                              <div className="flex justify-between items-center">
-                                <div>
-                                  <p className="text-sm text-gray-500">Current Discount</p>
-                                  <p className="text-2xl font-bold text-emerald-600">₹{discountVal.toLocaleString()}</p>
-                                </div>
-                                <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm font-medium">
-                                  {discountPercentage}% off
-                                </div>
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => setIsDiscountModalOpen(true)}
-                              className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
-                            >
-                              <RefreshCw size={16} className="mr-2" /> Update Discount
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            <div className="bg-white rounded-lg p-4 shadow-sm border border-dashed border-emerald-200 text-center">
-                              <p className="text-gray-500 mb-2">No discount applied yet</p>
-                              <DollarSign size={24} className="mx-auto text-emerald-300" />
-                            </div>
-                            <button
-                              onClick={() => setIsDiscountModalOpen(true)}
-                              className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
-                            >
-                              <Percent size={16} className="mr-2" /> Add Discount
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <ServiceTab
+                  selectedRecord={selectedRecord}
+                  loading={loading}
+                  groupedServiceItems={groupedServiceItems}
+                  hospitalServiceTotal={hospitalServiceTotal}
+                  errorsService={errorsService}
+                  registerService={registerService}
+                  handleSubmitService={handleSubmitService}
+                  onSubmitAdditionalService={onSubmitAdditionalService}
+                  serviceControl={serviceControl}
+                  masterServiceOptions={masterServiceOptions}
+                  setValueService={setValueService}
+                  resetService={resetService}
+                  handleDeleteGroupedServiceItem={handleDeleteGroupedServiceItem}
+                  discountVal={discountVal}
+                  discountPercentage={discountPercentage}
+                  setIsDiscountModalOpen={setIsDiscountModalOpen}
+                />
               )}
 
               {/* Payments Tab */}
               {activeTab === "payments" && (
-                <div className="p-6">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Payment Summary */}
-                    <div className="lg:col-span-2">
-                      <h3 className="text-xl font-semibold text-gray-800 mb-4">Payment Summary</h3>
-                      <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="bg-teal-50 rounded-lg p-4">
-                            <p className="text-sm text-teal-600">Total Bill</p>
-                            <p className="text-2xl font-bold text-teal-800">₹{totalBill.toLocaleString()}</p>
-                          </div>
-                          <div className="bg-cyan-50 rounded-lg p-4">
-                            <p className="text-sm text-cyan-600">Total Payments Received</p>
-                            <p className="text-2xl font-bold text-cyan-800">
-                              ₹{selectedRecord.totalDeposit.toLocaleString()}
-                            </p>
-                          </div>
-                          {balanceAmount > 0 ? (
-                            <div className="bg-red-50 rounded-lg p-4">
-                              <p className="text-sm text-red-600">Due Amount</p>
-                              <p className="text-2xl font-bold text-red-800">₹{balanceAmount.toLocaleString()}</p>
-                            </div>
-                          ) : balanceAmount < 0 ? (
-                            <div className="bg-blue-50 rounded-lg p-4">
-                              <p className="text-sm text-blue-600">Total Amount we have to Refund</p>
-                              <p className="text-2xl font-bold text-blue-800">
-                                ₹{Math.abs(balanceAmount).toLocaleString()}
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="bg-green-50 rounded-lg p-4">
-                              <p className="text-sm text-green-600">Fully Paid</p>
-                              <p className="text-2xl font-bold text-green-800">✓</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <h3 className="text-xl font-semibold text-gray-800 mb-4">Payment History</h3>
-                      {selectedRecord.payments.length === 0 ? (
-                        <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
-                          No payments recorded yet.
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
-                          <table className="w-full">
-                            <thead className="bg-gray-50">
-                              <tr>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  #
-                                </th>
-                                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Amount (₹)
-                                </th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Payment Type
-                                </th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Type
-                                </th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Through
-                                </th>{/* New Table Header */}
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Date
-                                </th>
-                                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Action
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                              {selectedRecord.payments.map((payment, idx) => (
-                                <tr key={payment.id || idx} className="hover:bg-gray-50">
-                                  <td className="px-4 py-3 text-sm text-gray-900">{idx + 1}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-900 text-right">
-                                    {payment.amount.toLocaleString()}
-                                  </td>
-                                  <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.amountType}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                                    {payment.through || "N/A"}
-                                  </td>{/* Display 'through' */}
-                                  <td className="px-4 py-3 text-sm text-gray-500">
-                                    {new Date(payment.date).toLocaleString()}
-                                  </td>
-                                  <td className="px-4 py-3 text-sm text-center">
-                                    <button
-                                      onClick={() =>
-                                        payment.id && payment.amountType &&
-                                        handleDeletePayment(payment.id, payment.amount, payment.amountType)
-                                      }
-                                      className="text-red-500 hover:text-red-700 transition-colors"
-                                      title="Delete payment"
-                                    >
-                                      <Trash size={16} />
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Record Payment Form */}
-                    <div className="lg:col-span-1">
-                      <div className="bg-white rounded-lg border border-gray-200 p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                          <CreditCard size={16} className="mr-2 text-teal-600" /> Record Payment
-                        </h3>
-                        <form onSubmit={handleSubmitPayment(onSubmitPayment)} className="space-y-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Payment Amount (₹)
-                            </label>
-                            <input
-                              type="number"
-                              {...registerPayment("paymentAmount")}
-                              placeholder="e.g., 5000"
-                              className={`w-full px-3 py-2 rounded-lg border ${
-                                errorsPayment.paymentAmount ? "border-red-500" : "border-gray-300"
-                              } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                            />
-                            {errorsPayment.paymentAmount && (
-                              <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentAmount.message}</p>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Type</label>
-                            <select
-                              {...registerPayment("paymentType")}
-                              className={`w-full px-3 py-2 rounded-lg border ${
-                                errorsPayment.paymentType ? "border-red-500" : "border-gray-300"
-                              } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                            >
-                              <option value="">Select Payment Type</option>
-                              <option value="cash">Cash</option>
-                              <option value="online">Online</option>
-                            </select>
-                            {errorsPayment.paymentType && (
-                              <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Through</label>
-                            <select
-                              {...registerPayment("through")}
-                              className={`w-full px-3 py-2 rounded-lg border ${
-                                errorsPayment.through ? "border-red-500" : "border-gray-300"
-                              } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                              disabled={watchPaymentType === "cash"} // Disable if paymentType is cash
-                            >
-                              {getThroughOptions()}
-                            </select>
-                            {errorsPayment.through && (
-                              <p className="text-red-500 text-xs mt-1">{errorsPayment.through.message}</p>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                            <select
-                              {...registerPayment("transactionType")} // Changed to transactionType
-                              className={`w-full px-3 py-2 rounded-lg border ${
-                                errorsPayment.transactionType ? "border-red-500" : "border-gray-300"
-                              } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                            >
-                              <option value="advance">Advance</option>
-                              <option value="deposit">Deposit</option>
-                              <option value="settlement">Settlement</option>
-                              <option value="refund">Refund</option>
-                            </select>
-                            {errorsPayment.transactionType && (
-                              <p className="text-red-500 text-xs mt-1">{errorsPayment.transactionType.message}</p>
-                            )}
-                          </div>
-                          <div>
-                            <div className="flex items-center mt-4">
-                              <input
-                                type="checkbox"
-                                id="sendWhatsappNotification"
-                                {...registerPayment("sendWhatsappNotification")}
-                                className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
-                              />
-                              <label htmlFor="sendWhatsappNotification" className="ml-2 block text-sm text-gray-900">
-                                Send message on WhatsApp
-                              </label>
-                            </div>
-                            {errorsPayment.sendWhatsappNotification && (
-                              <p className="text-red-500 text-xs mt-1">
-                                {errorsPayment.sendWhatsappNotification.message}
-                              </p>
-                            )}
-                          </div>
-                          <button
-                            type="submit"
-                            disabled={loading}
-                            className={`w-full py-2 px-4 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center ${
-                              loading ? "opacity-50 cursor-not-allowed" : ""
-                            }`}
-                          >
-                            {loading ? (
-                              "Processing..."
-                            ) : (
-                              <>
-                                <Plus size={16} className="mr-2" /> Add Payment
-                              </>
-                            )}
-                          </button>
-                        </form>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <PaymentTab
+                  selectedRecord={selectedRecord}
+                  loading={loading}
+                  errorsPayment={errorsPayment}
+                  registerPayment={registerPayment}
+                  handleSubmitPayment={handleSubmitPayment}
+                  onSubmitPayment={onSubmitPayment}
+                  watchPaymentType={watchPaymentType}
+                  getThroughOptions={getThroughOptions}
+                  handleDeletePayment={
+                    handleDeletePayment as (id: string, amount: number, amountType: string) => void
+                  }
+                />
               )}
-
-              {/* Consultants Tab */}
               {activeTab === "consultants" && (
                 <div className="p-6">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -2148,6 +1786,36 @@ export default function BillingPage() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* Note Tab */}
+              {activeTab === "note" && (
+                <Notetab
+                  ipdNote={ipdNote}
+                  setIpdNote={setIpdNote}
+                  ipdNoteLoading={ipdNoteLoading}
+                  onSaveNote={async (note) => {
+                    setIpdNoteLoading(true);
+                    try {
+                      const { error } = await supabase
+                        .from("ipd_registration")
+                        .update({ ipd_notes: note })
+                        .eq("ipd_id", Number(ipdId));
+                      if (error) {
+                        console.error("Supabase error updating note:", error);
+                        toast.error("Failed to save note: " + error.message);
+                      } else {
+                        toast.success("Note saved successfully!");
+                        setIpdNote(note); // Only update after successful save
+                        await fetchBillingData(); // Refetch to update UI
+                      }
+                    } catch (e) {
+                      toast.error("Failed to save note");
+                    } finally {
+                      setIpdNoteLoading(false);
+                    }
+                  }}
+                />
               )}
             </div>
           </motion.div>

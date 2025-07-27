@@ -28,6 +28,7 @@ interface Payment {
   amountType: "advance" | "deposit" | "settlement" | "refund" | "discount" // New: explicit type for calculation/display
   date: string
   through?: string // Added 'through' field
+  remark?: string // Added 'remark' field
 }
 
 export interface BillingRecord {
@@ -686,14 +687,13 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
               <div className="flex">
                 <table className="w-full text-[7px]"> {/* Full width like service tables */}
                   <thead>
-                  <tr className="">
-  {/* The vertical alignment should be on the <th> elements for table cells */}
-  <th className="py-0.5 px-1 text-left w-[120px]" style={{ verticalAlign: 'middle' }}>Remarks</th>
-  <th className="py-0.5 px-1 text-left" style={{ verticalAlign: 'middle' }}>Date</th>
-  <th className="py-0.5 px-1 text-left" style={{ verticalAlign: 'middle' }}>Type</th>
-  <th className="py-0.5 px-1 text-left" style={{ verticalAlign: 'middle' }}>Through</th>
-  <th className="py-0.5 px-1 text-right" style={{ verticalAlign: 'middle' }}>Amount (Rs)</th>
-</tr>
+                    <tr className="bg-blue-100">
+                      <th className="px-1 text-left w-[120px]" style={{ verticalAlign: 'middle', paddingBottom: '5px' }}>Remarks</th>
+                      <th className="px-1 text-left" style={{ verticalAlign: 'middle', paddingBottom: '5px' }}>Date</th>
+                      <th className="px-1 text-left" style={{ verticalAlign: 'middle', paddingBottom: '5px' }}>Type</th>
+                      <th className="px-1 text-left" style={{ verticalAlign: 'middle', paddingBottom: '5px' }}>Through</th>
+                      <th className="px-1 text-right" style={{ verticalAlign: 'middle', paddingBottom: '5px' }}>Amount (Rs)</th>
+                    </tr>
                   </thead>
                   <tbody>
                     {record.payments.map((payment, idx) => {
@@ -711,7 +711,7 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
 
                       return (
                         <tr key={idx}>
-                          <td className="py-0.5 px-1"></td> {/* Blank for remarks */}
+                          <td className="py-0.5 px-1">{payment.remark || ""}</td> {/* Show remark if present */}
                           <td className="py-0.5 px-1">{formatDate(payment.date)}</td>
                           <td className="py-0.5 px-1 capitalize">{payment.amountType}</td>
                           <td className="py-0.5 px-1 capitalize">{displayThrough}</td>

@@ -104,21 +104,50 @@ const AddDoctorPage = () => {
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
 
-  // Form state
+  // 1. Add state for room types
+  const [roomTypeOptions, setRoomTypeOptions] = useState<{ value: string, label: string }[]>([])
+
+  // 2. Fetch unique room types from bed_management
+  useEffect(() => {
+    const fetchRoomTypes = async () => {
+      const { data, error } = await supabase
+        .from("bed_management")
+        .select("room_type")
+        .neq("room_type", null)
+      if (!error && data) {
+        const uniqueTypes = Array.from(new Set(data.map((row) => row.room_type).filter(Boolean)))
+        setRoomTypeOptions(
+          uniqueTypes.map((type) => ({ value: type, label: type.charAt(0).toUpperCase() + type.slice(1) }))
+        )
+      }
+    }
+    fetchRoomTypes()
+  }, [])
+
+  // 3. Update formData to use bedCharges object
   const [formData, setFormData] = useState({
     doctorName: "",
     specialists: [] as string[],
     department: "",
     firstVisitCharge: "",
     followUpCharge: "",
-    femaleCharge: "",
-    maleCharge: "",
-    casualityCharge: "",
-    deluxCharge: "",
-    nicuCharge: "",
-    suitCharge: "",
-    icuCharge: "",
+    bedCharges: {} as { [roomType: string]: string },
   })
+
+  // 4. When roomTypeOptions change, initialize bedCharges keys if not present
+  useEffect(() => {
+    setFormData((prev) => {
+      const newBedCharges = { ...prev.bedCharges }
+      roomTypeOptions.forEach(rt => {
+        if (!(rt.value in newBedCharges)) newBedCharges[rt.value] = ""
+      })
+      // Remove keys that are no longer in roomTypeOptions
+      Object.keys(newBedCharges).forEach(key => {
+        if (!roomTypeOptions.find(rt => rt.value === key)) delete newBedCharges[key]
+      })
+      return { ...prev, bedCharges: newBedCharges }
+    })
+  }, [roomTypeOptions])
 
   useEffect(() => {
     fetchDoctors()
@@ -212,17 +241,7 @@ const AddDoctorPage = () => {
           department: formData.department === "both" ? "Both" : "OPD",
           followUpCharge: Number.parseInt(formData.followUpCharge) || 0,
           firstVisitCharge: Number.parseInt(formData.firstVisitCharge) || 0,
-          ...(formData.department === "both" && {
-            ipdCharges: {
-              female: Number.parseInt(formData.femaleCharge) || 0,
-              male: Number.parseInt(formData.maleCharge) || 0,
-              casuality: Number.parseInt(formData.casualityCharge) || 0,
-              delux: Number.parseInt(formData.deluxCharge) || 0,
-              nicu: Number.parseInt(formData.nicuCharge) || 0,
-              suit: Number.parseInt(formData.suitCharge) || 0,
-              icu: Number.parseInt(formData.icuCharge) || 0,
-            },
-          }),
+          bedCharges: { ...formData.bedCharges },
         })
       }
 
@@ -231,15 +250,7 @@ const AddDoctorPage = () => {
           id: Math.random().toString(36).substr(2, 9),
           name: formData.doctorName,
           department: "IPD",
-          ipdCharges: {
-            female: Number.parseInt(formData.femaleCharge) || 0,
-            male: Number.parseInt(formData.maleCharge) || 0,
-            casuality: Number.parseInt(formData.casualityCharge) || 0,
-            delux: Number.parseInt(formData.deluxCharge) || 0,
-            nicu: Number.parseInt(formData.nicuCharge) || 0,
-            suit: Number.parseInt(formData.suitCharge) || 0,
-            icu: Number.parseInt(formData.icuCharge) || 0,
-          },
+          bedCharges: { ...formData.bedCharges },
         })
       }
 
@@ -277,26 +288,21 @@ const AddDoctorPage = () => {
     }
   }
 
+  // 5. In handleEdit, populate bedCharges from doctor.charges[0]?.bedCharges
   const handleEdit = (doctor: Doctor) => {
     setEditingDoctor(doctor)
-    const charges = doctor.charges[0] || {}
     setFormData({
       doctorName: doctor.dr_name,
       specialists: doctor.specialist,
       department: doctor.department,
-      firstVisitCharge: charges.firstVisitCharge?.toString() || "",
-      followUpCharge: charges.followUpCharge?.toString() || "",
-      femaleCharge: charges.ipdCharges?.female?.toString() || "",
-      maleCharge: charges.ipdCharges?.male?.toString() || "",
-      casualityCharge: charges.ipdCharges?.casuality?.toString() || "",
-      deluxCharge: charges.ipdCharges?.delux?.toString() || "",
-      nicuCharge: charges.ipdCharges?.nicu?.toString() || "",
-      suitCharge: charges.ipdCharges?.suit?.toString() || "",
-      icuCharge: charges.ipdCharges?.icu?.toString() || "",
+      firstVisitCharge: doctor.charges[0]?.firstVisitCharge?.toString() || "",
+      followUpCharge: doctor.charges[0]?.followUpCharge?.toString() || "",
+      bedCharges: doctor.charges[0]?.bedCharges || {},
     })
     setIsEditDialogOpen(true)
   }
 
+  // 6. In handleSubmit and handleUpdate, store bedCharges in charges
   const handleUpdate = async () => {
     if (!editingDoctor) return
     setIsLoading(true)
@@ -311,17 +317,7 @@ const AddDoctorPage = () => {
           department: formData.department === "both" ? "Both" : "OPD",
           followUpCharge: Number.parseInt(formData.followUpCharge) || 0,
           firstVisitCharge: Number.parseInt(formData.firstVisitCharge) || 0,
-          ...(formData.department === "both" && {
-            ipdCharges: {
-              female: Number.parseInt(formData.femaleCharge) || 0,
-              male: Number.parseInt(formData.maleCharge) || 0,
-              casuality: Number.parseInt(formData.casualityCharge) || 0,
-              delux: Number.parseInt(formData.deluxCharge) || 0,
-              nicu: Number.parseInt(formData.nicuCharge) || 0,
-              suit: Number.parseInt(formData.suitCharge) || 0,
-              icu: Number.parseInt(formData.icuCharge) || 0,
-            },
-          }),
+          bedCharges: { ...formData.bedCharges },
         })
       }
 
@@ -330,15 +326,7 @@ const AddDoctorPage = () => {
           id: editingDoctor.charges[0]?.id || Math.random().toString(36).substr(2, 9),
           name: formData.doctorName,
           department: "IPD",
-          ipdCharges: {
-            female: Number.parseInt(formData.femaleCharge) || 0,
-            male: Number.parseInt(formData.maleCharge) || 0,
-            casuality: Number.parseInt(formData.casualityCharge) || 0,
-            delux: Number.parseInt(formData.deluxCharge) || 0,
-            nicu: Number.parseInt(formData.nicuCharge) || 0,
-            suit: Number.parseInt(formData.suitCharge) || 0,
-            icu: Number.parseInt(formData.icuCharge) || 0,
-          },
+          bedCharges: { ...formData.bedCharges },
         })
       }
 
@@ -388,13 +376,7 @@ const AddDoctorPage = () => {
       department: "",
       firstVisitCharge: "",
       followUpCharge: "",
-      femaleCharge: "",
-      maleCharge: "",
-      casualityCharge: "",
-      deluxCharge: "",
-      nicuCharge: "",
-      suitCharge: "",
-      icuCharge: "",
+      bedCharges: {},
     })
   }
 
@@ -531,101 +513,23 @@ const AddDoctorPage = () => {
               )}
 
               {(formData.department === "ipd" || formData.department === "both") && (
-                <div className="space-y-4 p-4 border border-purple-200 rounded-lg bg-purple-50 shadow-sm">
-                  <Label className="font-semibold text-purple-800 text-lg">Enter IPD Ward Charges</Label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="femaleCharge" className="font-medium text-gray-700">
-                        Female Charge (₹)
-                      </Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {roomTypeOptions.map((room) => (
+                    <div className="space-y-2" key={room.value}>
+                      <Label htmlFor={`charge-${room.value}`}>{room.label} Charge (₹)</Label>
                       <Input
-                        id="femaleCharge"
+                        id={`charge-${room.value}`}
                         type="number"
-                        placeholder="Enter female ward charge"
-                        value={formData.femaleCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, femaleCharge: e.target.value }))}
+                        placeholder={`Enter ${room.label.toLowerCase()} charge`}
+                        value={formData.bedCharges[room.value] || ""}
+                        onChange={e => setFormData(prev => ({
+                          ...prev,
+                          bedCharges: { ...prev.bedCharges, [room.value]: e.target.value }
+                        }))}
                         className="rounded-md shadow-sm"
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="maleCharge" className="font-medium text-gray-700">
-                        Male Charge (₹)
-                      </Label>
-                      <Input
-                        id="maleCharge"
-                        type="number"
-                        placeholder="Enter male ward charge"
-                        value={formData.maleCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, maleCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="casualityCharge" className="font-medium text-gray-700">
-                        Casualty Charge (₹)
-                      </Label>
-                      <Input
-                        id="casualityCharge"
-                        type="number"
-                        placeholder="Enter casualty charge"
-                        value={formData.casualityCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, casualityCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="deluxCharge" className="font-medium text-gray-700">
-                        Delux Charge (₹)
-                      </Label>
-                      <Input
-                        id="deluxCharge"
-                        type="number"
-                        placeholder="Enter delux charge"
-                        value={formData.deluxCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, deluxCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="nicuCharge" className="font-medium text-gray-700">
-                        NICU Charge (₹)
-                      </Label>
-                      <Input
-                        id="nicuCharge"
-                        type="number"
-                        placeholder="Enter NICU charge"
-                        value={formData.nicuCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, nicuCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="suitCharge" className="font-medium text-gray-700">
-                        Suit Charge (₹)
-                      </Label>
-                      <Input
-                        id="suitCharge"
-                        type="number"
-                        placeholder="Enter suit charge"
-                        value={formData.suitCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, suitCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="icuCharge" className="font-medium text-gray-700">
-                        ICU Charge (₹)
-                      </Label>
-                      <Input
-                        id="icuCharge"
-                        type="number"
-                        placeholder="Enter ICU charge"
-                        value={formData.icuCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, icuCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                  </div>
+                  ))}
                 </div>
               )}
 
@@ -696,37 +600,15 @@ const AddDoctorPage = () => {
                                 <span className="font-medium">Follow Up:</span> ₹{doctor.charges[0].followUpCharge}
                               </p>
                             )}
-                            {doctor.charges[0].ipdCharges && (
+                            {doctor.charges[0].bedCharges && Object.keys(doctor.charges[0].bedCharges).length > 0 ? (
                               <>
-                                <p>
-                                  <span className="font-medium">Female Ward:</span> ₹
-                                  {doctor.charges[0].ipdCharges.female || "N/A"}
-                                </p>
-                                <p>
-                                  <span className="font-medium">Male Ward:</span> ₹
-                                  {doctor.charges[0].ipdCharges.male || "N/A"}
-                                </p>
-                                <p>
-                                  <span className="font-medium">Casualty:</span> ₹
-                                  {doctor.charges[0].ipdCharges.casuality || "N/A"}
-                                </p>
-                                <p>
-                                  <span className="font-medium">Delux:</span> ₹
-                                  {doctor.charges[0].ipdCharges.delux || "N/A"}
-                                </p>
-                                <p>
-                                  <span className="font-medium">NICU:</span> ₹
-                                  {doctor.charges[0].ipdCharges.nicu || "N/A"}
-                                </p>
-                                <p>
-                                  <span className="font-medium">Suit:</span> ₹
-                                  {doctor.charges[0].ipdCharges.suit || "N/A"}
-                                </p>
-                                <p>
-                                  <span className="font-medium">ICU:</span> ₹{doctor.charges[0].ipdCharges.icu || "N/A"}
-                                </p>
+                                {Object.entries(doctor.charges[0].bedCharges).map(([roomType, charge]) => (
+                                  <p key={roomType}>
+                                    <span className="font-medium">{roomType}:</span> ₹{(charge !== undefined && charge !== null && charge !== "") ? String(charge) : "N/A"}
+                                  </p>
+                                ))}
                               </>
-                            )}
+                            ) : null}
                           </div>
                         )}
 
@@ -779,7 +661,9 @@ const AddDoctorPage = () => {
         </Card>
 
         {/* Edit Dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        {/* Changed onOpenChange to an explicit arrow function, which might
+            help TypeScript resolve the type in some unusual environment cases. */}
+        <Dialog open={isEditDialogOpen} onOpenChange={(open) => setIsEditDialogOpen(open)}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-2xl font-bold text-gray-800">Edit Doctor</DialogTitle>
@@ -866,73 +750,23 @@ const AddDoctorPage = () => {
               )}
 
               {(formData.department === "ipd" || formData.department === "both") && (
-                <div className="space-y-4 p-4 border border-purple-200 rounded-lg bg-purple-50 shadow-sm">
-                  <Label className="text-lg font-semibold text-purple-800">Enter IPD Ward Charges</Label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label className="text-gray-700">Female Charge (₹)</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {roomTypeOptions.map((room) => (
+                    <div className="space-y-2" key={room.value}>
+                      <Label className="text-gray-700">
+                        {room.label} Charge (₹)
+                      </Label>
                       <Input
                         type="number"
-                        value={formData.femaleCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, femaleCharge: e.target.value }))}
+                        value={formData.bedCharges[room.value] || ""}
+                        onChange={e => setFormData(prev => ({
+                          ...prev,
+                          bedCharges: { ...prev.bedCharges, [room.value]: e.target.value }
+                        }))}
                         className="rounded-md shadow-sm"
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label className="text-gray-700">Male Charge (₹)</Label>
-                      <Input
-                        type="number"
-                        value={formData.maleCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, maleCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-gray-700">Casuality Charge (₹)</Label>
-                      <Input
-                        type="number"
-                        value={formData.casualityCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, casualityCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-gray-700">Delux Charge (₹)</Label>
-                      <Input
-                        type="number"
-                        value={formData.deluxCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, deluxCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-gray-700">NICU Charge (₹)</Label>
-                      <Input
-                        type="number"
-                        value={formData.nicuCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, nicuCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-gray-700">Suit Charge (₹)</Label>
-                      <Input
-                        type="number"
-                        value={formData.suitCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, suitCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-gray-700">ICU Charge (₹)</Label>
-                      <Input
-                        type="number"
-                        value={formData.icuCharge}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, icuCharge: e.target.value }))}
-                        className="rounded-md shadow-sm"
-                      />
-                    </div>
-                  </div>
+                  ))}
                 </div>
               )}
             </div>
