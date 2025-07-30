@@ -35,8 +35,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { supabase } from "@/lib/supabase"
-import { useUser } from '@/components/global/UserContext';
-import { useRouter } from 'next/navigation';
 
 interface IModality {
   charges: number
@@ -102,22 +100,10 @@ interface DashboardStats {
 
 type DateFilter = "today" | "7days"
 
-export default function Page() {
-  const { role, loading } = useUser();
-  const router = useRouter();
-  useEffect(() => {
-    if (!loading) {
-      if (!role) {
-        router.replace('/unknown');
-      } else if (role === 'opd-ipd') {
-        router.replace('/opd/appointment');
-      }
-    }
-  }, [role, loading, router]);
-
+const AdminDashboardPage: React.FC = () => {
   const [dateFilter, setDateFilter] = useState<DateFilter>("7days")
   const [opdAppointments, setOpdAppointments] = useState<IOPDEntry[]>([])
-  const [localLoading, setLocalLoading] = useState(true)
+  const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [selectedAppointment, setSelectedAppointment] = useState<IOPDEntry | null>(null)
@@ -159,7 +145,7 @@ export default function Page() {
 
   const fetchOPDAppointments = useCallback(
     async (filter: DateFilter) => {
-      const isRefresh = !localLoading
+      const isRefresh = !loading
       if (isRefresh) setRefreshing(true)
 
       try {
@@ -236,11 +222,11 @@ export default function Page() {
         console.error("Error fetching OPD appointments:", error)
         toast.error("Failed to load appointments")
       } finally {
-        setLocalLoading(false)
+        setLoading(false)
         if (isRefresh) setRefreshing(false)
       }
     },
-    [getDateRange, localLoading],
+    [getDateRange, loading],
   )
 
   useEffect(() => {
@@ -401,7 +387,7 @@ export default function Page() {
     fetchOPDAppointments(dateFilter)
   }
 
-  if (localLoading) {
+  if (loading) {
     return (
       <Layout>
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
@@ -880,3 +866,5 @@ export default function Page() {
     </Layout>
   )
 }
+
+export default AdminDashboardPage

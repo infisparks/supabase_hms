@@ -31,8 +31,6 @@ import {
   Legend,
 } from "chart.js"
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
-import { useUser } from '@/components/global/UserContext';
-import { useRouter } from 'next/navigation';
 
 // PatientDetail type (from your codebase)
 interface PatientDetail {
@@ -86,19 +84,7 @@ function isThisMonth(date: string) {
   return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
 }
 
-export default function Page() {
-  const { role, loading } = useUser();
-  const router = useRouter();
-  useEffect(() => {
-    if (!loading) {
-      if (!role) {
-        router.replace('/unknown');
-      } else if (role === 'opd-ipd') {
-        router.replace('/opd/appointment');
-      }
-    }
-  }, [role, loading, router]);
-
+const PatientAdminPage = () => {
   const [patients, setPatients] = useState<PatientDetail[]>([])
   const [filtered, setFiltered] = useState<PatientDetail[]>([])
   const [search, setSearch] = useState("")
@@ -106,12 +92,12 @@ export default function Page() {
   const [editPatient, setEditPatient] = useState<PatientDetail | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState<Partial<PatientDetail>>({})
-  const [localLoading, setLocalLoading] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   // Fetch all patients
   useEffect(() => {
     const fetchPatients = async () => {
-      setLocalLoading(true)
+      setLoading(true)
       const { data, error } = await supabase.from("patient_detail").select("*").order("created_at", { ascending: false })
       if (error) {
         toast.error("Failed to fetch patients")
@@ -119,7 +105,7 @@ export default function Page() {
       } else {
         setPatients(data || [])
       }
-      setLocalLoading(false)
+      setLoading(false)
     }
     fetchPatients()
   }, [])
@@ -211,7 +197,7 @@ export default function Page() {
   }
   const handleEditSave = async () => {
     if (!editPatient) return
-    setLocalLoading(true)
+    setLoading(true)
     const { error } = await supabase
       .from("patient_detail")
       .update({
@@ -236,12 +222,12 @@ export default function Page() {
       )
       closeEdit()
     }
-    setLocalLoading(false)
+    setLoading(false)
   }
   // Delete logic
   const handleDelete = async (p: PatientDetail) => {
     if (!window.confirm(`Delete patient ${p.name} (${p.uhid})?`)) return
-    setLocalLoading(true)
+    setLoading(true)
     const { error } = await supabase.from("patient_detail").delete().eq("patient_id", p.patient_id)
     if (error) {
       toast.error("Failed to delete patient")
@@ -249,7 +235,7 @@ export default function Page() {
       toast.success("Patient deleted")
       setPatients((prev) => prev.filter((x) => x.patient_id !== p.patient_id))
     }
-    setLocalLoading(false)
+    setLoading(false)
   }
 
   return (
@@ -368,7 +354,7 @@ export default function Page() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
-              {localLoading ? (
+              {loading ? (
                 <tr>
                   <td colSpan={6} className="text-center py-12 text-gray-400">Loading...</td>
                 </tr>
@@ -440,7 +426,7 @@ export default function Page() {
                 <label className="block text-sm font-medium text-gray-700">Gender</label>
                 <Input value={editForm.gender || ""} onChange={e => handleEditChange("gender", e.target.value)} />
               </div>
-              <Button className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold" onClick={handleEditSave} disabled={localLoading}>
+              <Button className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold" onClick={handleEditSave} disabled={loading}>
                 Update
               </Button>
             </div>
@@ -450,3 +436,5 @@ export default function Page() {
     </Layout>
   )
 }
+
+export default PatientAdminPage

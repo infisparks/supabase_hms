@@ -77,8 +77,6 @@ import {
 } from "@/action/appointment"
 import { openBillInNewTabProgrammatically } from "./bill-generator"
 import Layout from "@/components/global/Layout"
-import { useUser } from '@/components/global/UserContext';
-import { useRouter } from 'next/navigation';
 
 // Helper functions (kept at top-level scope)
 function formatAMPM(date: Date): string {

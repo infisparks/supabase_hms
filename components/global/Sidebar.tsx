@@ -28,14 +28,31 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
-import { useUser } from './UserContext';
+import { useUserRole } from '../userrole';
 
 const Sidebar = () => {
+  const { role, loading } = useUserRole();
   const [isOpen, setIsOpen] = useState(false)
   const [expandedMenus, setExpandedMenus] = useState<string[]>([])
   const pathname = usePathname()
   const router = useRouter()
-  const { role, loading } = useUser();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
+        <span className="ml-4 text-blue-700 font-semibold">Loading...</span>
+      </div>
+    );
+  }
+
+  if (!role) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <span className="text-red-600 font-semibold">No access: User role not found.</span>
+      </div>
+    );
+  }
 
   const toggleSidebar = () => setIsOpen(!isOpen)
 
@@ -52,64 +69,74 @@ const Sidebar = () => {
     router.push('/login')
   }
 
-  const menuItems = [
-    {
-      title: 'Dashboard',
-      icon: LayoutDashboard,
-      href: '/dashboard',
-    },
-    {
-      title: 'Manage Admin',
-      icon: Users,
-      submenu: [
-        { title: 'OPD Admin', href: '/admin/opd-admin' },
-        { title: 'IPD Admin', href: '/admin/ipd-admin' },
-        { title: 'Patient Admin', href: '/admin/patient-admin' },
-        // { title: 'Mortality Report', href: '/admin/mortality-report' },
-        { title: 'DPR', href: '/admin/dpr' },
-        { title: 'Add Service', href: '/admin/add-service' },
-      ]
-    },
-    // {
-    //   title: 'Changes',
-    //   icon: Settings,
-    //   submenu: [
-    //     { title: 'OPD Changes', href: '/changes/opd-changes' },
-    //     { title: 'IPD Changes', href: '/changes/ipd-changes' },
-    //   ]
-    // },
-    {
-      title: 'OPD',
-      icon: Stethoscope,
-      submenu: [
-        { title: 'Appointment', href: '/opd/appointment' },
-        { title: 'OPD List', href: '/opd/list' },
-        { title: 'Add Doctor', href: '/opd/add-doctor' },
-      ]
-    },
-    {
-      title: 'IPD',
-      icon: Bed,
-      submenu: [
-        { title: 'IPD Appointment', href: '/ipd/appointment' },
-        { title: 'IPD Management', href: '/ipd/management' },
-        { title: 'BED Management', href: '/ipd/bed-management' },
-        { title: 'Add Doctor', href: '/ipd/add-doctor' },
-      ]
-    },
-    // {
-    //   title: 'Mortality',
-    //   icon: Skull,
-    //   href: '/mortality',
-    // },
-  ]
-
-  // Filter menuItems based on role
-  let filteredMenuItems = menuItems;
-  if (role === 'opd-ipd') {
-    filteredMenuItems = menuItems.filter(item =>
-      item.title === 'OPD' || item.title === 'IPD'
-    );
+  type MenuItem = {
+    title: string;
+    icon: React.ElementType;
+    href?: string;
+    submenu: { title: string; href: string }[];
+  };
+  let menuItems: MenuItem[] = [];
+  if (role === 'admin') {
+    menuItems = [
+      {
+        title: 'Dashboard',
+        icon: LayoutDashboard,
+        href: '/dashboard',
+        submenu: [],
+      },
+      {
+        title: 'Manage Admin',
+        icon: Users,
+        submenu: [
+          { title: 'OPD Admin', href: '/admin/opd-admin' },
+          { title: 'IPD Admin', href: '/admin/ipd-admin' },
+          { title: 'Patient Admin', href: '/admin/patient-admin' },
+          { title: 'DPR', href: '/admin/dpr' },
+          { title: 'Add Service', href: '/admin/add-service' },
+        ]
+      },
+      {
+        title: 'OPD',
+        icon: Stethoscope,
+        submenu: [
+          { title: 'Appointment', href: '/opd/appointment' },
+          { title: 'OPD List', href: '/opd/list' },
+          { title: 'Add Doctor', href: '/opd/add-doctor' },
+        ]
+      },
+      {
+        title: 'IPD',
+        icon: Bed,
+        submenu: [
+          { title: 'IPD Appointment', href: '/ipd/appointment' },
+          { title: 'IPD Management', href: '/ipd/management' },
+          { title: 'BED Management', href: '/ipd/bed-management' },
+          { title: 'Add Doctor', href: '/ipd/add-doctor' },
+        ]
+      },
+    ];
+  } else if (role === 'opd-ipd') {
+    menuItems = [
+      {
+        title: 'OPD',
+        icon: Stethoscope,
+        submenu: [
+          { title: 'Appointment', href: '/opd/appointment' },
+          { title: 'OPD List', href: '/opd/list' },
+          { title: 'Add Doctor', href: '/opd/add-doctor' },
+        ]
+      },
+      {
+        title: 'IPD',
+        icon: Bed,
+        submenu: [
+          { title: 'IPD Appointment', href: '/ipd/appointment' },
+          { title: 'IPD Management', href: '/ipd/management' },
+          { title: 'BED Management', href: '/ipd/bed-management' },
+          { title: 'Add Doctor', href: '/ipd/add-doctor' },
+        ]
+      },
+    ];
   }
 
   return (
@@ -163,9 +190,9 @@ const Sidebar = () => {
         <ScrollArea className="flex-1 h-[calc(100vh-140px)]">
           <nav className="py-4">
             <ul className="space-y-1 px-3">
-              {filteredMenuItems.map((item) => (
+              {menuItems.map((item) => (
                 <li key={item.title}>
-                  {item.submenu ? (
+                  {item.submenu.length > 0 ? (
                     <div>
                       <button
                         onClick={() => toggleMenu(item.title)}
@@ -190,28 +217,30 @@ const Sidebar = () => {
                         "overflow-hidden transition-all duration-300 ease-in-out",
                         expandedMenus.includes(item.title) ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
                       )}>
-                        <ul className="mt-2 space-y-1 ml-6 border-l-2 border-gray-100">
-                          {item.submenu.map((subItem) => (
-                            <li key={subItem.title}>
-                              <Link
-                                href={subItem.href}
-                                className={cn(
-                                  "block px-4 py-2 text-sm rounded-lg transition-all duration-200 ml-2",
-                                  pathname === subItem.href
-                                    ? "bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-700 font-medium shadow-sm"
-                                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                                )}
-                              >
-                                {subItem.title}
-                              </Link>
-                            </li>
-                          ))}
-                        </ul>
+                        {Array.isArray(item.submenu) && (
+                          <ul className="mt-2 space-y-1 ml-6 border-l-2 border-gray-100">
+                            {(item.submenu as { title: string; href: string }[]).map((subItem) => (
+                              <li key={subItem.title}>
+                                <Link
+                                  href={(subItem.href ?? '/') as string}
+                                  className={cn(
+                                    "block px-4 py-2 text-sm rounded-lg transition-all duration-200 ml-2",
+                                    pathname === subItem.href
+                                      ? "bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-700 font-medium shadow-sm"
+                                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                                  )}
+                                >
+                                  {subItem.title}
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     </div>
                   ) : (
                     <Link
-                      href={item.href}
+                      href={item.href ?? '/'}
                       className={cn(
                         "flex items-center space-x-3 px-3 py-3 text-sm font-medium rounded-xl transition-all duration-200",
                         pathname === item.href

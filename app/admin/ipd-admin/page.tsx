@@ -37,7 +37,6 @@ import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, L
 // Assuming these are from shadcn/ui or similar component library
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import Layout from "@/components/global/Layout" // Assuming your global layout component
-import { useUser } from '@/components/global/UserContext';
 
 // Register Chart.js components
 import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip as ChartTooltip, Legend as ChartLegend } from "chart.js" // Renamed to avoid conflict
@@ -291,19 +290,8 @@ const fromIST = (istDate: Date): Date => {
 
 
 export default function IPDAdminPage() {
-  const { role, loading } = useUser();
-  const router = useRouter();
-  useEffect(() => {
-    if (!loading) {
-      if (!role) {
-        router.replace('/unknown');
-      } else if (role === 'opd-ipd') {
-        router.replace('/opd/appointment');
-      }
-    }
-  }, [role, loading, router]);
-
-  const [localLoading, setLocalLoading] = useState(true)
+  const router = useRouter()
+  const [loading, setLoading] = useState(true)
   const [ipdSummary, setIpdSummary] = useState({
     today: 0,
     thisWeek: 0,
@@ -321,7 +309,7 @@ export default function IPDAdminPage() {
 
   // Fetches summary data for IPD admissions (today, this week, this month) and trend data for the last 30 days
   const fetchIPDSummary = useCallback(async () => {
-    setLocalLoading(true)
+    setLoading(true)
     try {
       const { data, error } = await supabase.from("ipd_registration").select("created_at") // Only need admission date for summary
 
@@ -388,13 +376,13 @@ export default function IPDAdminPage() {
       console.error("Error in fetchIPDSummary:", error)
       toast.error("Error loading IPD summary.")
     } finally {
-      setLocalLoading(false)
+      setLoading(false)
     }
   }, [])
 
   // Fetches the list of all IPD patients for the table, with date filtering
   const fetchPatients = useCallback(async () => {
-    setLocalLoading(true)
+    setLoading(true)
     try {
       let query = supabase.from("ipd_registration").select(
         `
@@ -439,7 +427,7 @@ export default function IPDAdminPage() {
       console.error("Error in fetchPatients:", error)
       toast.error("Error loading patient list.")
     } finally {
-      setLocalLoading(false)
+      setLoading(false)
     }
   }, [filterStartDate, filterEndDate]) // Re-fetch when date filters change
 
@@ -490,7 +478,7 @@ export default function IPDAdminPage() {
 
   // Handles opening the patient history modal and fetching detailed data
   const handleViewPatientHistory = useCallback(async (ipdId: number) => {
-    setLocalLoading(true) // Set main loading to true while fetching modal data
+    setLoading(true) // Set main loading to true while fetching modal data
     try {
       const { data, error } = await supabase
         .from("ipd_registration")
@@ -593,7 +581,7 @@ export default function IPDAdminPage() {
       toast.error("Error loading patient history details.")
       setSelectedPatientForHistory(null)
     } finally {
-      setLocalLoading(false)
+      setLoading(false)
     }
   }, [])
 
@@ -657,7 +645,7 @@ export default function IPDAdminPage() {
   }, [selectedPatientForHistory]);
 
   // Loading state for the main page
-  if (localLoading && !selectedPatientForHistory) {
+  if (loading && !selectedPatientForHistory) {
     return (
       <Layout>
         <div className="min-h-[calc(100vh-150px)] bg-gradient-to-br from-cyan-50 to-teal-50 flex items-center justify-center rounded-lg">
@@ -684,7 +672,7 @@ export default function IPDAdminPage() {
               fetchIPDSummary()
               fetchPatients()
             }}
-            disabled={localLoading}
+            disabled={loading}
             className="flex items-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw size={16} className="mr-2" /> Refresh Data
@@ -856,7 +844,7 @@ export default function IPDAdminPage() {
                 )}
               </div>
             </div>
-            {localLoading ? (
+            {loading ? (
               <div className="text-center py-12 text-gray-500">
                 <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-teal-600" />
                 <p>Loading patient list...</p>
