@@ -848,7 +848,7 @@ const DashboardPage: React.FC = () => {
       totalOpdCount: opdAppointments.length,
       totalOpdAmount: totalOpdAmt,
       totalIpdCount: ipdAppointments.length,
-      totalIpdAmount: totalIpdDeposits, // This is now total deposits/advances/settlements
+      totalIpdAmount: netIpdContribution, // This is now net deposits after refunds (deposits - refunds)
       overallIpdRefunds: totalIpdRefunds,
       totalOtCount: otAppointments.length, // This already gives the count of OT procedures
       opdCash,
@@ -1507,7 +1507,7 @@ const DashboardPage: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-600">Total Deposits</span>
+                      <span className="text-sm text-gray-600">Net Deposits</span>
                       <span className="text-lg font-semibold text-orange-600">
                         {formatCurrency(statistics.totalIpdAmount)}
                       </span>
@@ -1594,6 +1594,14 @@ const DashboardPage: React.FC = () => {
                               {formatCurrency(statistics.ipdOnline)}
                             </span>
                           </div>
+                          {statistics.overallIpdRefunds > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-gray-600 text-sm">💰 Refund</span>
+                              <span className="font-semibold text-blue-600">
+                                {formatCurrency(statistics.overallIpdRefunds)}
+                              </span>
+                            </div>
+                          )}
                           <div className="flex justify-between items-center pt-2 border-t border-orange-200">
                             <span className="text-orange-700 font-medium">Total IPD (Net Deposit)</span>
                             <span className="font-bold text-orange-700">

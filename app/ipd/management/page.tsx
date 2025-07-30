@@ -15,12 +15,24 @@ import {
   Stethoscope,
   RefreshCw,
   IndianRupeeIcon,
+  Trash2,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import Layout from "@/components/global/Layout"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -45,6 +57,10 @@ interface BedManagementSupabase {
 }
 interface PaymentDetailItemSupabase {
   amount: number
+  type?: string
+  paymentType?: string
+  amountType?: string
+  transactionType?: string
 }
 interface ServiceDetailItemSupabase {
   // Not fetching these, but keeping interface for BillingRecord consistency if needed later
@@ -152,10 +168,41 @@ export default function IPDManagementPage() {
   }, [])
   const processedRecords = useMemo(() => {
     return allIpdRecords.map((record) => {
-      const totalDeposit = (record.payment_detail || []).reduce(
-        (sum, payment) => sum + (Number(payment.amount) || 0),
+      // Calculate deposits and refunds separately
+      const totalDeposits = (record.payment_detail || []).reduce(
+        (sum, payment) => {
+          const amtType = payment.amountType?.toLowerCase();
+          const pType = payment.type?.toLowerCase();
+          const pPaymentType = payment.paymentType?.toLowerCase();
+          const pTransactionType = payment.transactionType?.toLowerCase();
+          
+          // Only count positive contributions (deposits, advances, settlements)
+          if (
+            amtType === "advance" || amtType === "deposit" || amtType === "settlement" ||
+            pType === "advance" || pType === "deposit" || pTransactionType === "settlement"
+          ) {
+            return sum + (Number(payment.amount) || 0);
+          }
+          return sum;
+        },
         0,
-      )
+      );
+      
+      const totalRefunds = (record.payment_detail || []).reduce(
+        (sum, payment) => {
+          const pType = payment.type?.toLowerCase();
+          
+          // Only count refunds
+          if (pType === "refund") {
+            return sum + (Number(payment.amount) || 0);
+          }
+          return sum;
+        },
+        0,
+      );
+      
+      // Net deposit = deposits - refunds
+      const netDeposit = totalDeposits - totalRefunds;
       // Get discharge_type from the joined discharge_summaries.
       // Assuming one summary per IPD record, or take the first if multiple somehow.
       const dischargeSummary = record.discharge_summaries?.[0];
@@ -177,7 +224,7 @@ export default function IPDManagementPage() {
         patientId: record.patient_detail?.patient_id || "N/A",
         name: record.patient_detail?.name || "Unknown",
         mobileNumber: record.patient_detail?.number ? String(record.patient_detail.number) : "N/A",
-        depositAmount: totalDeposit,
+        depositAmount: netDeposit,
         roomType: record.bed_management?.room_type ? formatRoomType(record.bed_management.room_type) : "N/A",
         bedNumber: record.bed_management?.bed_number || "N/A",
         status: status,
@@ -287,6 +334,59 @@ export default function IPDManagementPage() {
     router.push(`/ipd/ot/${record.ipdId}`)
     toast.info(`Navigating to OT Form for: ${record.name} (UHID: ${record.uhid})`)
   }, [router])
+
+  // Delete handler for IPD records
+  const handleDeleteRecord = useCallback(async (record: BillingRecord) => {
+    try {
+      // First, get the bed_id from the IPD record
+      const { data: ipdData, error: ipdError } = await supabase
+        .from("ipd_registration")
+        .select("bed_id")
+        .eq("ipd_id", record.ipdId)
+        .single()
+
+      if (ipdError) {
+        console.error("Error fetching bed_id:", ipdError)
+        toast.error("Failed to fetch bed information")
+        return
+      }
+
+      const bedId = ipdData?.bed_id
+
+      // Delete the IPD record
+      const { error: deleteError } = await supabase
+        .from("ipd_registration")
+        .delete()
+        .eq("ipd_id", record.ipdId)
+
+      if (deleteError) {
+        console.error("Error deleting IPD record:", deleteError)
+        toast.error("Failed to delete IPD record")
+        return
+      }
+
+      // If bed_id exists, update bed status to available
+      if (bedId) {
+        const { error: bedUpdateError } = await supabase
+          .from("bed_management")
+          .update({ status: "available" })
+          .eq("id", bedId)
+
+        if (bedUpdateError) {
+          console.error("Error updating bed status:", bedUpdateError)
+          toast.error("IPD record deleted but failed to update bed status")
+          return
+        }
+      }
+
+      toast.success(`Successfully deleted IPD record for ${record.name}`)
+      // Refresh the records
+      fetchIPDRecords()
+    } catch (error) {
+      console.error("Error in delete operation:", error)
+      toast.error("Failed to delete IPD record")
+    }
+  }, [fetchIPDRecords])
   if (isLoading) {
     return (
       <Layout>
@@ -324,14 +424,14 @@ export default function IPDManagementPage() {
             </Card>
             <Card className="bg-white shadow-lg border border-green-100">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-green-600">Total Deposits</CardTitle>
+                <CardTitle className="text-sm font-medium text-green-600">Net Deposits</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex items-center">
                   <IndianRupeeIcon className="h-6 w-6 text-green-500 mr-3" />
                   <span className="text-3xl font-bold text-slate-800">{formatCurrency(totalDeposits)}</span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">Total amount collected as deposits</p>
+                <p className="text-xs text-slate-500 mt-1">Net deposits after refunds</p>
               </CardContent>
             </Card>
           </div>
@@ -431,6 +531,7 @@ export default function IPDManagementPage() {
                     handleManagePatient,
                     handleDrugChart,
                     handleOTForm,
+                    handleDeleteRecord,
                     isLoading,
                     formatCurrency,
                   )}
@@ -443,6 +544,7 @@ export default function IPDManagementPage() {
                     handleManagePatient,
                     handleDrugChart,
                     handleOTForm,
+                    handleDeleteRecord,
                     isLoading,
                     formatCurrency,
                   )}
@@ -455,6 +557,7 @@ export default function IPDManagementPage() {
                     handleManagePatient,
                     handleDrugChart,
                     handleOTForm,
+                    handleDeleteRecord,
                     isLoading,
                     formatCurrency,
                   )}
@@ -474,6 +577,7 @@ function renderPatientsTable(
   handleManagePatient: (e: React.MouseEvent, record: BillingRecord) => void,
   handleDrugChart: (e: React.MouseEvent, record: BillingRecord) => void,
   handleOTForm: (e: React.MouseEvent, record: BillingRecord) => void,
+  handleDeleteRecord: (record: BillingRecord) => void,
   isLoading: boolean,
   formatCurrency: (amount: number) => string,
 ) {
@@ -502,7 +606,7 @@ function renderPatientsTable(
             <th className="px-4 py-3 text-left font-semibold text-slate-600">#</th>
             <th className="px-4 py-3 text-left font-semibold text-slate-600">Patient Name</th>
             <th className="px-4 py-3 text-left font-semibold text-slate-600">Mobile Number</th>
-            <th className="px-4 py-3 text-left font-semibold text-slate-600">Deposit (₹)</th>
+            <th className="px-4 py-3 text-left font-semibold text-slate-600">Net Deposit (₹)</th>
             <th className="px-4 py-3 text-left font-semibold text-slate-600">Room Type</th>
             <th className="px-4 py-3 text-left font-semibold text-slate-600">Status</th>
             <th className="px-4 py-3 text-right font-semibold text-slate-600">Actions</th>
@@ -585,6 +689,37 @@ function renderPatientsTable(
                     <Stethoscope className="h-4 w-4 mr-1" />
                     OT
                   </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-red-600 hover:bg-red-50 border-red-200 whitespace-nowrap"
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete IPD Record</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Are you sure you want to delete the IPD record for {record.name} (UHID: {record.uhid})? 
+                          This action will also make the bed available again. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => handleDeleteRecord(record)}
+                          className="bg-red-600 hover:bg-red-700"
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </td>
             </tr>
