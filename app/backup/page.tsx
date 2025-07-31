@@ -144,7 +144,7 @@ interface PatientInfo {
 
 interface FilterState {
   searchQuery: string
-  filterType: "week" | "today" | "month" | "dateRange"
+  filterType: "dateRange"
   selectedMonth: string
   startDate: string
   endDate: string
@@ -198,10 +198,10 @@ const DashboardPage: React.FC = () => {
 
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: "",
-    filterType: "today", // Set default to 'today'
+    filterType: "dateRange", // Set default to 'dateRange'
     selectedMonth: format(new Date(), "yyyy-MM"),
-    startDate: "",
-    endDate: "",
+    startDate: "2024-07-01", // Default to July 1
+    endDate: "2024-07-30", // Default to July 30
   })
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [selectedAppointment, setSelectedAppointment] = useState<CombinedAppointment | null>(null)
@@ -221,17 +221,7 @@ const DashboardPage: React.FC = () => {
 
   // Compute current date range
   const currentDateRange = useMemo(() => {
-    switch (filters.filterType) {
-      case "today":
-        return { start: getTodayDate(), end: getTodayDate() }
-      case "month":
-        return getMonthRange(filters.selectedMonth)
-      case "dateRange":
-        return { start: filters.startDate, end: filters.endDate }
-      case "week":
-      default:
-        return getThisWeekRange()
-    }
+    return { start: filters.startDate, end: filters.endDate }
   }, [filters])
 
   // Initial data loading from data.json
@@ -610,45 +600,16 @@ const DashboardPage: React.FC = () => {
   }
 
   const handleFilterChange = (upd: Partial<FilterState>) => {
-    if (upd.filterType === "today") {
-      setFilters((p) => ({
-        ...p,
-        filterType: "today",
-        startDate: "",
-        endDate: "",
-        selectedMonth: format(new Date(), "yyyy-MM"),
-        searchQuery: "", // Clear search query when changing filter type
-      }))
-    } else if (upd.filterType === "week") {
-      setFilters((p) => ({
-        ...p,
-        filterType: "week",
-        startDate: "",
-        endDate: "",
-        selectedMonth: format(new Date(), "yyyy-MM"),
-        searchQuery: "", // Clear search query
-      }))
-    } else if (upd.filterType === "month") {
-      setFilters((p) => ({
-        ...p,
-        filterType: "month",
-        startDate: "",
-        endDate: "",
-        selectedMonth: upd.selectedMonth || format(new Date(), "yyyy-MM"),
-        searchQuery: "", // Clear search query
-      }))
-    } else {
-      setFilters((p) => ({ ...p, ...upd }))
-    }
+    setFilters((p) => ({ ...p, ...upd }))
   }
 
   const resetFilters = () =>
     setFilters({
       searchQuery: "",
-      filterType: "week",
+      filterType: "dateRange",
       selectedMonth: format(new Date(), "yyyy-MM"),
-      startDate: "",
-      endDate: "",
+      startDate: "2024-07-01", // Reset to July 1
+      endDate: "2024-07-30", // Reset to July 30
     })
 
   // Modal for individual appointment details
@@ -745,22 +706,11 @@ const DashboardPage: React.FC = () => {
   }
 
   const getFilterTitle = () => {
-    switch (filters.filterType) {
-      case "today":
-        return "Today's Data"
-      case "month":
-        return `${format(new Date(filters.selectedMonth + "-01"), "MMMM yyyy")} Data`
-      case "dateRange":
-        if (!filters.startDate || !filters.endDate) return "Select date range"
-        return `${format(new Date(filters.startDate), "MMM dd")} - ${format(
-          new Date(filters.endDate),
-          "MMM dd, yyyy",
-        )}`
-      case "week":
-      default:
-        const { start, end } = currentDateRange
-        return `Week: ${format(new Date(start), "MMM dd")} - ${format(new Date(end), "MMM dd, yyyy")}`
-    }
+    if (!filters.startDate || !filters.endDate) return "Select date range"
+    return `${format(new Date(filters.startDate), "MMM dd")} - ${format(
+      new Date(filters.endDate),
+      "MMM dd, yyyy",
+    )}`
   }
 
   const getModalitiesSummary = (mods?: IModality[]) => {
@@ -827,58 +777,16 @@ const DashboardPage: React.FC = () => {
               <div className="bg-white rounded-xl shadow-sm mb-6 p-6 border border-gray-100">
                 <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4">
                   <h2 className="text-lg font-semibold text-gray-800 flex items-center mb-4 lg:mb-0">
-                    <Filter className="mr-2 h-5 w-5 text-sky-500" /> Advanced Filters
+                    <Filter className="mr-2 h-5 w-5 text-sky-500" /> Date Range Filter
                   </h2>
                   <button
                     onClick={resetFilters}
                     className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 flex items-center"
                   >
-                    <RefreshCw className="mr-2 h-4 w-4" /> Reset All
+                    <RefreshCw className="mr-2 h-4 w-4" /> Reset to July
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* Quick Filters */}
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700">Quick Filters</label>
-                    <div className="flex flex-wrap gap-2">
-                      {["week", "today", "month"].map((mode) => {
-                        const label = mode === "week" ? "This Week" : mode === "today" ? "Today" : "This Month"
-                        return (
-                          <button
-                            key={mode}
-                            onClick={() =>
-                              handleFilterChange({
-                                filterType: mode as any,
-                                ...(mode === "month" ? { selectedMonth: format(new Date(), "yyyy-MM") } : {}),
-                              })
-                            }
-                            className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                              filters.filterType === mode
-                                ? "bg-sky-600 text-white shadow-md"
-                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Month Filter */}
-                  <div>
-                    <label htmlFor="month" className="block text-sm font-medium text-gray-700 mb-1">
-                      Filter by Month
-                    </label>
-                    <input
-                      type="month"
-                      id="month"
-                      value={filters.selectedMonth}
-                      onChange={(e) => handleFilterChange({ selectedMonth: e.target.value, filterType: "month" })}
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
-                    />
-                  </div>
-
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Date Range Filter */}
                   <div>
                     <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">

@@ -267,7 +267,7 @@ const DPRPage = () => {
             .header {
               text-align: center;
               margin-bottom: 15px; /* Reduced margin */
-              padding-top: 100px; /* Increased top margin for better spacing */
+              padding-top: 140px; /* Increased top padding to prevent cutting off */
             }
             .title {
               font-size: 22px; /* Smaller title */
@@ -630,5 +630,3 @@ const DPRPage = () => {
 }
 
 export default DPRPage
-
-
