@@ -20,9 +20,14 @@ import {
 import { supabase } from '@/lib/supabase'
 import { format, parseISO } from 'date-fns'
 
-// Import html2pdf
-// @ts-ignore
-import html2pdf from 'html2pdf.js';
+// Dynamic import for html2pdf to avoid SSR issues
+let html2pdf: any = null;
+if (typeof window !== 'undefined') {
+  // @ts-ignore
+  import('html2pdf.js').then(module => {
+    html2pdf = module.default;
+  });
+}
 
 const getDayRangeForSupabase = (dateString: string) => {
   const start = `${dateString}T00:00:00`;
@@ -240,7 +245,7 @@ const DPRPage = () => {
         width: '210mm',      // A4 width
         boxSizing: 'border-box',
         position: 'relative',
-        backgroundImage: `url(${window.location.origin}/letterhead.png)`,
+        backgroundImage: `url(${typeof window !== 'undefined' ? window.location.origin : ''}/letterhead.png)`,
         backgroundRepeat: 'no-repeat',
         backgroundPosition: 'center center',
         backgroundSize: '100% 100%', // Cover the entire A4 area
@@ -447,7 +452,7 @@ const DPRPage = () => {
 
 
   const handlePrint = () => {
-    if (printContentRef.current) {
+    if (printContentRef.current && html2pdf) {
       const options = {
         margin: [0, 0, 0, 0], // Keep margins at 0 for full letterhead coverage
         filename: `Daily_Performance_Report_${format(parseISO(selectedDate), 'yyyy-MM-dd')}.pdf`,
@@ -466,6 +471,8 @@ const DPRPage = () => {
       };
 
       html2pdf().from(printContentRef.current).set(options).save();
+    } else if (!html2pdf) {
+      console.warn('html2pdf not loaded yet. Please try again.');
     }
   };
 
