@@ -473,7 +473,7 @@ const AppointmentPage = () => {
     let message = `*Dear ${patientName},*\n\n`
 
     if (appointmentType === "visithospital") {
-      message += `Your *OPD appointment* has been successfully booked at MedBliss Hospital.\n\n`
+      message += `Your *OPD appointment* has been successfully booked at Medford Hospital.\n\n`
       if (uhid) message += `*UHID:* ${uhid}\n`
       if (billNo) message += `*Bill No:* ${billNo}\n\n`
 
@@ -499,7 +499,7 @@ const AppointmentPage = () => {
       if (uhid) message += `*UHID:* ${uhid}\n`
       message += `\nOur team will contact you shortly.`
     }
-    message += `\n\n*Thank you for choosing MedBliss Hospital.*`
+    message += `\n\n*Thank you for choosing Medford Hospital.*`
 
     try {
       const response = await fetch(apiUrl, {

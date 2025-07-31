@@ -590,7 +590,7 @@ const IPDAppointmentPage = () => {
       // Patient message
       if (formData.phone) {
         const patientMessage = `
-🏥 *IPD Admission Confirmation - MedBliss Hospital*
+🏥 *IPD Admission Confirmation - Medford Hospital*
 
 Dear *${formData.name}*,
 
@@ -607,7 +607,7 @@ Your IPD admission has been successfully registered.
 We wish you a speedy recovery!
 
 For any assistance, please contact us.
-MedBliss Hospital
+Medford Hospital
 `;
         await sendWhatsAppNotification(String(formData.phone), patientMessage); // Ensure phone is string
       }
@@ -615,7 +615,7 @@ MedBliss Hospital
       // Relative message
       if (formData.relativeName && formData.relativePhone) {
         const relativeMessage = `
-🏥 *IPD Admission Update - MedBliss Hospital*
+🏥 *IPD Admission Update - Medford Hospital*
 
 Dear ${formData.relativeName},
 
@@ -635,7 +635,7 @@ This message is to confirm the IPD admission of *${formData.name}*.
 We will keep you updated on their progress.
 
 For any queries, please feel free to reach out.
-MedBliss Hospital
+Medford Hospital
 `;
         await sendWhatsAppNotification(String(formData.relativePhone), relativeMessage); // Ensure relativePhone is string
       }
