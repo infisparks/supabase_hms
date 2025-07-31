@@ -50,7 +50,7 @@ async function generatePdfDocument({ appointmentData, uhid, doctors, billNo }: G
     return doc ? String(doc.dr_name) : String(doctorId) // Ensure name is string
   }
 
-  let yPos = 48
+  let yPos = 53
   doc.setFontSize(9)
   doc.setFont("helvetica", "normal")
   doc.text(

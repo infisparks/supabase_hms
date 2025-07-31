@@ -36,8 +36,8 @@ import { toast } from "sonner"
 interface BedData {
   id: string // Assuming Supabase ID is a string (UUID)
   room_type: string
-  bed_number: string | number // Allow number, convert to string for search/display
-  bed_type: string
+  bed_number: string | number | null // Allow number, convert to string for search/display
+  bed_type: string | null
   status: string
   created_at: string
 }
@@ -134,6 +134,13 @@ const BedManagementPage = () => {
     fetchBeds()
   }, [fetchBeds])
 
+  // Debug form data changes when editing
+  useEffect(() => {
+    if (isEditDialogOpen) {
+      console.log("Edit dialog form data:", formData)
+    }
+  }, [formData, isEditDialogOpen])
+
   const filteredBeds = useMemo(() => {
     let currentFiltered = beds
 
@@ -193,13 +200,16 @@ const BedManagementPage = () => {
 
   const handleEdit = (bed: BedData) => {
     console.log("Editing bed:", bed)
+    console.log("Bed number type:", typeof bed.bed_number, "Value:", bed.bed_number)
     setEditingBed(bed)
-    setFormData({
+    const formDataToSet = {
       roomType: bed.room_type,
-      bedNumber: bed.bed_number.toString(),
-      bedType: bed.bed_type,
-      status: bed.status,
-    })
+      bedNumber: bed.bed_number?.toString() || "",
+      bedType: bed.bed_type || "",
+      status: bed.status || "available",
+    }
+    console.log("Setting form data:", formDataToSet)
+    setFormData(formDataToSet)
     setIsEditDialogOpen(true)
   }
 
@@ -610,7 +620,10 @@ const BedManagementPage = () => {
                   id="editBedNumber"
                   placeholder="e.g. B101"
                   value={formData.bedNumber}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, bedNumber: e.target.value }))}
+                  onChange={(e) => {
+                    console.log("Bed number changed to:", e.target.value)
+                    setFormData((prev) => ({ ...prev, bedNumber: e.target.value }))
+                  }}
                   required
                 />
               </div>

@@ -548,7 +548,7 @@ const DashboardPage: React.FC = () => {
         // Use the appropriate date column for filtering
         const dateColumnForOPD = filters.filterType === 'today' ? 'date' : 'created_at';
         const dateColumnForIPD = filters.filterType === 'today' ? 'admission_date' : 'created_at';
-        const dateColumnForOT = filters.filterType === 'today' ? 'ot_date' : 'created_at';
+        const dateColumnForOT = 'ot_date'; // Always use ot_date for OT filtering, regardless of filter type
 
         // For today filter, we need to use simple date strings for date columns
         const todayDateString = filters.filterType === 'today' ? currentDateRange.displayStart : null;
@@ -728,15 +728,15 @@ const DashboardPage: React.FC = () => {
             id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at
           `);
 
-        // For today filter, use date range comparison for ot_date
+        // Always filter by ot_date (the selected OT date), not by created_at or IPD admission date
         if (filters.filterType === 'today') {
-          // Try multiple date formats for ot_date
-          // Since ot_date might be stored as timestamp with timezone
+          // For today filter, use date range comparison for ot_date
           const todayStart = `${todayDateString}T00:00:00+05:30`;
           const todayEnd = `${todayDateString}T23:59:59+05:30`;
           otQuery = otQuery.gte('ot_date', todayStart).lte('ot_date', todayEnd);
         } else {
-          otQuery = otQuery.gte(dateColumnForOT, start).lte(dateColumnForOT, end);
+          // For other filters, also use ot_date but with the selected date range
+          otQuery = otQuery.gte('ot_date', start).lte('ot_date', end);
         }
 
         const { data: otData, error: otError } = await otQuery;
@@ -745,8 +745,13 @@ const DashboardPage: React.FC = () => {
         
         // Debug logging for OT results
         if (filters.filterType === 'today') {
-          console.log('OT query results for today:', otData?.length || 0, 'records');
+          console.log('OT query results for today (filtered by ot_date):', otData?.length || 0, 'records');
           console.log('OT data:', otData);
+          if (otData && otData.length > 0) {
+            console.log('OT dates in database:', otData.map(ot => ot.ot_date));
+          }
+        } else {
+          console.log(`OT query results for date range (filtered by ot_date):`, otData?.length || 0, 'records');
           if (otData && otData.length > 0) {
             console.log('OT dates in database:', otData.map(ot => ot.ot_date));
           }

@@ -88,11 +88,13 @@ const Sidebar = () => {
         title: 'Manage Admin',
         icon: Users,
         submenu: [
+          { title: 'june data backup', href: '/backup' },
+
           { title: 'OPD Admin', href: '/admin/opd-admin' },
           { title: 'IPD Admin', href: '/admin/ipd-admin' },
           { title: 'Patient Admin', href: '/admin/patient-admin' },
           { title: 'DPR', href: '/admin/dpr' },
-          { title: 'Add Service', href: '/admin/add-service' },
+          { title: 'Add Service', href: '/dashboard/add-service' },
         ]
       },
       {

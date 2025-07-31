@@ -21,6 +21,7 @@ import {
   Stethoscope,
   Calendar,
   Pencil, // Added for edit icon hint
+  CalendarDays, // Added for date picker icon
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import Layout from "@/components/global/Layout"; // Assuming this path is correct
@@ -75,6 +76,7 @@ interface OtDetailsSupabase {
 interface OTFormInputs {
   otType: "Major" | "Minor" | undefined; // Undefined for no selection, per React Hook Form / yup setup
   otNotes: string | null;
+  otDate: string; // Added for custom OT date
 }
 
 // --- Validation Schema ---
@@ -83,6 +85,7 @@ const otSchema = yup.object().shape({
     .oneOf(["Major", "Minor"], "Please select either Major OT or Minor OT")
     .required("OT Type is required"), // required() works well with undefined
   otNotes: yup.string().nullable(),
+  otDate: yup.string().required("OT Date is required"), // Added validation for OT date
 });
 
 export default function OTPage() {
@@ -93,6 +96,12 @@ export default function OTPage() {
   const [existingOtRecord, setExistingOtRecord] = useState<OtDetailsSupabase | null>(null); // State for fetched OT data
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Get current date in YYYY-MM-DD format for default value
+  const getCurrentDate = () => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  };
 
   const {
     register,
@@ -106,6 +115,7 @@ export default function OTPage() {
     defaultValues: {
       otType: undefined,
       otNotes: null,
+      otDate: getCurrentDate(), // Set current date as default
     },
     // IMPORTANT: Enable re-initialization if existingOtRecord changes after initial load
     // This allows the form to populate if data loads after the form renders
@@ -170,14 +180,21 @@ export default function OTPage() {
       } else if (otData) {
         // If data found, set it and pre-fill the form
         setExistingOtRecord(otData);
+        // Format the existing OT date to YYYY-MM-DD for the date input
+        const existingOtDate = otData.ot_date ? otData.ot_date.split('T')[0] : getCurrentDate();
         reset({
           otType: otData.ot_type,
           otNotes: otData.ot_notes,
+          otDate: existingOtDate,
         });
         toast.info("Existing OT details loaded for editing.");
       } else {
         setExistingOtRecord(null); // No existing record
-        reset({ otType: undefined, otNotes: null }); // Ensure form is clear for new entry
+        reset({ 
+          otType: undefined, 
+          otNotes: null,
+          otDate: getCurrentDate(), // Reset to current date for new entry
+        }); // Ensure form is clear for new entry
       }
 
     } catch (err) {
@@ -202,12 +219,15 @@ export default function OTPage() {
     }
     setSaving(true);
     try {
+      // Convert the date string to ISO format for database storage
+      const otDateISO = new Date(formData.otDate + 'T00:00:00').toISOString();
+      
       const payload = {
         ipd_id: patientRecord.ipd_id,
         uhid: patientRecord.uhid,
         ot_type: formData.otType,
         ot_notes: formData.otNotes,
-        ot_date: new Date().toISOString(), // Use current timestamp for OT date
+        ot_date: otDateISO, // Use the selected date instead of current timestamp
         // created_at will default in DB for new inserts. For updates, it stays the same.
       };
 
@@ -412,6 +432,24 @@ export default function OTPage() {
                         </div>
                         {errors.otType && (
                           <p className="text-red-500 text-xs mt-1">{errors.otType.message}</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label htmlFor="otDate" className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                          <CalendarDays size={16} className="mr-2 text-teal-600" />
+                          OT Date <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          id="otDate"
+                          {...register("otDate")}
+                          className={`w-full px-3 py-2 border rounded-lg shadow-sm
+                            ${errors.otDate ? "border-red-500" : "border-gray-300"}
+                            focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                        />
+                        {errors.otDate && (
+                          <p className="text-red-500 text-xs mt-1">{errors.otDate.message}</p>
                         )}
                       </div>
 
