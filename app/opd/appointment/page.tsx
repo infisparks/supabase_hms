@@ -741,7 +741,7 @@ const AppointmentPage = () => {
                 <div className="flex gap-2">
                   <Input
                     id="search-uhid"
-                    placeholder="Enter UHID"
+                    placeholder="Enter UHID or counter number (e.g., MG-070625-00001 or 00001)"
                     value={searchUhIdInput}
                     onChange={(e) => setSearchUhIdInput(e.target.value)}
                     disabled={isSearching || !!selectedPatient}

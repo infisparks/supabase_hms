@@ -11,11 +11,23 @@ interface CreateAppointmentResult {
 
 export async function searchPatientByUhId(uhid: string) {
   try {
-    const { data, error } = await supabase
+    // Check if the input is just a number (counter part)
+    const isCounterOnly = /^\d+$/.test(uhid)
+    
+    let query = supabase
       .from("patient_detail")
       .select("patient_id, name, number, age, age_unit, dob, gender, address, uhid")
-      .eq("uhid", uhid)
-      .single()
+    
+    if (isCounterOnly) {
+      // Search by counter number using LIKE to match the end of UHID
+      query = query.ilike("uhid", `%-${uhid.padStart(5, '0')}`)
+    } else {
+      // Search by exact UHID match
+      query = query.eq("uhid", uhid)
+    }
+    
+    const { data, error } = await query.single()
+    
     if (error && error.code !== "PGRST116") {
       // PGRST116 means no rows found
       console.error("Error searching patient by UHID:", error)
@@ -28,6 +40,32 @@ export async function searchPatientByUhId(uhid: string) {
   } catch (error: any) {
     console.error("Error in searchPatientByUhId:", error)
     return { success: false, message: "Failed to search patient by UHID: " + error.message }
+  }
+}
+
+// New function to search by counter number only
+export async function searchPatientByCounterNumber(counterNumber: string) {
+  try {
+    // Ensure counter number is properly formatted (5 digits with leading zeros)
+    const formattedCounter = counterNumber.padStart(5, '0')
+    
+    const { data, error } = await supabase
+      .from("patient_detail")
+      .select("patient_id, name, number, age, age_unit, dob, gender, address, uhid")
+      .ilike("uhid", `%-${formattedCounter}`)
+      .single()
+    
+    if (error && error.code !== "PGRST116") {
+      console.error("Error searching patient by counter number:", error)
+      throw error
+    }
+    if (!data) {
+      return { success: false, message: "Patient not found with counter number." }
+    }
+    return { success: true, patient: data }
+  } catch (error: any) {
+    console.error("Error in searchPatientByCounterNumber:", error)
+    return { success: false, message: "Failed to search patient by counter number: " + error.message }
   }
 }
 

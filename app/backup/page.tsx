@@ -430,10 +430,25 @@ const DashboardPage: React.FC = () => {
   const filteredAppointments = useMemo(() => {
     if (filters.searchQuery) {
       const q = filters.searchQuery.toLowerCase()
+      // Check if the search query is just a number (counter part)
+      const isCounterOnly = /^\d+$/.test(filters.searchQuery)
+      
       // Filter the pre-loaded allPatientsInfo
-      const matchingPatients = allPatientsInfo.filter(
-        (p) => p.name.toLowerCase().includes(q) || p.phone.includes(q) || p.uhid.toLowerCase().includes(q),
-      )
+      const matchingPatients = allPatientsInfo.filter((p) => {
+        if (isCounterOnly) {
+          // Search by counter number - check if UHID ends with the counter number
+          const counterNumber = filters.searchQuery.padStart(5, '0')
+          return p.name.toLowerCase().includes(q) || 
+                 p.phone.includes(q) || 
+                 p.uhid.toLowerCase().includes(q) ||
+                 p.uhid.toLowerCase().endsWith(`-${counterNumber}`)
+        } else {
+          // Regular search
+          return p.name.toLowerCase().includes(q) || 
+                 p.phone.includes(q) || 
+                 p.uhid.toLowerCase().includes(q)
+        }
+      })
       setSearchedPatients(matchingPatients.slice(0, 10)) // Limit for display
       setSearchDownloadedBytes(JSON.stringify(matchingPatients).length) // Illustrative size
       return [] // Return empty for appointments list when in search mode
@@ -757,7 +772,7 @@ const DashboardPage: React.FC = () => {
                 <Search className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
                 <input
                   type="text"
-                  placeholder="Search by name, phone, or UHID (min 3 chars)"
+                  placeholder="Search by name, phone, UHID, or counter number (min 3 chars)"
                   value={filters.searchQuery}
                   onChange={(e) => setFilters((p) => ({ ...p, searchQuery: e.target.value }))}
                   className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition shadow-sm"

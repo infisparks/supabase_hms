@@ -1674,7 +1674,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                   <div className="flex gap-2">
                     <Input
                       id="searchUhId"
-                      placeholder="Enter UHID (e.g., MG-070525-0001)"
+                      placeholder="Enter UHID or counter number (e.g., MG-070525-00001 or 00001)"
                       value={searchUhIdInput}
                       onChange={(e) => setSearchUhIdInput(e.target.value)}
                       disabled={isSearching}
