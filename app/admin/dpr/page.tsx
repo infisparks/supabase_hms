@@ -16,6 +16,7 @@ import {
   UserCheck,
   Building2,
   Printer,
+  Heart,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { format, parseISO } from 'date-fns'
@@ -43,6 +44,7 @@ interface KPIData {
   totalMajorOT: number;
   totalMinorOT: number;
   totalOTProcedures: number;
+  totalDeaths: number;
 }
 
 
@@ -77,6 +79,7 @@ const DPRPage = () => {
     totalMajorOT: 0,
     totalMinorOT: 0,
     totalOTProcedures: 0,
+    totalDeaths: 0,
   });
 
   const [bedManagement, setBedManagement] = useState<BedManagement[]>([]);
@@ -146,6 +149,25 @@ const DPRPage = () => {
         throw bedError;
       }
 
+      // Fetch discharge summaries for deaths
+      const { data: dischargeSummaries, error: dischargeError } = await supabase
+        .from('discharge_summaries')
+        .select(`
+          id,
+          ipd_id,
+          patient_id,
+          uhid,
+          discharge_type,
+          last_updated
+        `)
+        .eq('discharge_type', 'Death')
+        .gte('last_updated', start)
+        .lte('last_updated', end);
+      if (dischargeError) {
+        console.error("Supabase Discharge Summaries fetch error:", dischargeError);
+        throw dischargeError;
+      }
+
       // --- KPI Calculations ---
       const totalOPD = opdAppointments?.length || 0;
       const totalIPD = ipdAdmissions?.length || 0;
@@ -171,6 +193,9 @@ const DPRPage = () => {
 
       const totalOT = majorOT + minorOT;
 
+      // Death calculations
+      const totalDeaths = dischargeSummaries?.length || 0;
+
       setKpiData({
         totalOPDAppointments: totalOPD,
         totalIPDAdmissions: totalIPD,
@@ -178,28 +203,31 @@ const DPRPage = () => {
         totalMajorOT: majorOT,
         totalMinorOT: minorOT,
         totalOTProcedures: totalOT,
+        totalDeaths: totalDeaths,
       });
 
       // --- Bed Management Tab Data ---
       const uniqueRoomTypes = Array.from(new Set(beds?.map(bed => bed.room_type).filter(Boolean))) as string[];
 
-      const bedManagementData: BedManagement[] = uniqueRoomTypes.map(roomType => {
-        const bedsInThisWard = beds?.filter(bed => bed.room_type === roomType) || [];
+      const bedManagementData: BedManagement[] = uniqueRoomTypes
+        .filter(roomType => !roomType.toLowerCase().includes('test ward')) // Filter out Test Ward
+        .map(roomType => {
+          const bedsInThisWard = beds?.filter(bed => bed.room_type === roomType) || [];
 
-        const totalBedsInWard = bedsInThisWard.length;
-        const occupiedBedsInWard = bedsInThisWard.filter(bed => bed.status === 'occupied').length;
-        const availableBedsInWard = bedsInThisWard.filter(bed => bed.status === 'available').length;
+          const totalBedsInWard = bedsInThisWard.length;
+          const occupiedBedsInWard = bedsInThisWard.filter(bed => bed.status === 'occupied').length;
+          const availableBedsInWard = bedsInThisWard.filter(bed => bed.status === 'available').length;
 
-        const occupancyRate = totalBedsInWard > 0 ? (occupiedBedsInWard / totalBedsInWard) * 100 : 0;
+          const occupancyRate = totalBedsInWard > 0 ? (occupiedBedsInWard / totalBedsInWard) * 100 : 0;
 
-        return {
-          wardName: roomType,
-          totalBeds: totalBedsInWard,
-          occupiedBeds: occupiedBedsInWard,
-          availableBeds: availableBedsInWard,
-          occupancyRate: parseFloat(occupancyRate.toFixed(1)),
-        };
-      }).sort((a,b) => b.occupancyRate - a.occupancyRate);
+          return {
+            wardName: roomType,
+            totalBeds: totalBedsInWard,
+            occupiedBeds: occupiedBedsInWard,
+            availableBeds: availableBedsInWard,
+            occupancyRate: parseFloat(occupancyRate.toFixed(1)),
+          };
+        }).sort((a,b) => b.occupancyRate - a.occupancyRate);
 
       setBedManagement(bedManagementData);
 
@@ -217,6 +245,14 @@ const DPRPage = () => {
           type: 'success',
           message: `High discharge rate: ${totalDischarges} patients discharged today.`,
           icon: TrendingUp
+        });
+      }
+
+      if (totalDeaths > 0) {
+        currentAlerts.push({
+          type: 'warning',
+          message: `${totalDeaths} death(s) recorded today. Review cases for quality assurance.`,
+          icon: AlertTriangle
         });
       }
 
@@ -241,14 +277,14 @@ const DPRPage = () => {
         // Overall padding reduced significantly to maximize content area
         padding: '10px 15px', // Top/Bottom, Left/Right
         color: '#333',
-        minHeight: '297mm', // A4 height
         width: '210mm',      // A4 width
+        height: '297mm',     // A4 height - full height
         boxSizing: 'border-box',
         position: 'relative',
         backgroundImage: `url(${typeof window !== 'undefined' ? window.location.origin : ''}/letterhead.png)`,
         backgroundRepeat: 'no-repeat',
         backgroundPosition: 'center center',
-        backgroundSize: '100% 100%', // Cover the entire A4 area
+        backgroundSize: '210mm 297mm', // Exact A4 dimensions
         fontSize: '11px', // Base font size for report, can be adjusted further
       }}>
         <style>
@@ -272,7 +308,7 @@ const DPRPage = () => {
             .header {
               text-align: center;
               margin-bottom: 15px; /* Reduced margin */
-              padding-top: 140px; /* Increased top padding to prevent cutting off */
+              padding-top: 150px; /* Increased top padding to prevent cutting off */
             }
             .title {
               font-size: 22px; /* Smaller title */
@@ -291,7 +327,7 @@ const DPRPage = () => {
 
             .kpi-grid {
               display: grid;
-              grid-template-columns: repeat(4, 1fr);
+              grid-template-columns: repeat(5, 1fr);
               gap: 8px; /* Reduced gap */
               margin: 15px 0; /* Reduced margin */
             }
@@ -394,6 +430,10 @@ const DPRPage = () => {
             <div className="kpi-value">{kpiData.totalDischarges}</div>
             <div className="kpi-label">Total Discharges</div>
           </div>
+          <div className="kpi-card">
+            <div className="kpi-value">{kpiData.totalDeaths}</div>
+            <div className="kpi-label">Total Deaths</div>
+          </div>
         </div>
 
         <div className="ot-card">
@@ -451,7 +491,7 @@ const DPRPage = () => {
   }, [selectedDate, kpiData, bedManagement]); // Removed 'alerts' from dependency array
 
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (printContentRef.current && html2pdf) {
       const options = {
         margin: [0, 0, 0, 0], // Keep margins at 0 for full letterhead coverage
@@ -463,14 +503,29 @@ const DPRPage = () => {
           allowTaint: true,
           logging: false,
           letterRendering: true,
-          // Explicitly set background color for html2canvas to render it transparent
-          // or rely on the CSS `background-color: transparent`
-          // backgroundColor: null, // this might help html2canvas render the background as transparent
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       };
 
-      html2pdf().from(printContentRef.current).set(options).save();
+      try {
+        // Generate PDF as blob instead of downloading
+        const pdfBlob = await html2pdf().from(printContentRef.current).set(options).outputPdf('blob');
+        
+        // Create blob URL
+        const blobUrl = URL.createObjectURL(pdfBlob);
+        
+        // Open PDF in new tab
+        window.open(blobUrl, '_blank');
+        
+        // Clean up blob URL after a delay
+        setTimeout(() => {
+          URL.revokeObjectURL(blobUrl);
+        }, 1000);
+      } catch (error) {
+        console.error('Error generating PDF:', error);
+        // Fallback to original download method
+        html2pdf().from(printContentRef.current).set(options).save();
+      }
     } else if (!html2pdf) {
       console.warn('html2pdf not loaded yet. Please try again.');
     }
@@ -536,7 +591,7 @@ const DPRPage = () => {
         </div>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
           <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-blue-100 bg-blue-50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-blue-800">Total OPD</CardTitle>
@@ -590,6 +645,17 @@ const DPRPage = () => {
               <p className="text-xs text-emerald-600 mt-1">Discharges on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
+
+          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-red-100 bg-red-50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-red-800">Total Deaths</CardTitle>
+              <Heart className="h-5 w-5 text-red-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-red-900">{kpiData.totalDeaths}</div>
+              <p className="text-xs text-red-600 mt-1">Deaths on {format(parseISO(selectedDate), 'MMM dd')}</p>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Bed Management Section */}
@@ -626,7 +692,7 @@ const DPRPage = () => {
 
 
         {/* Hidden div for PDF generation */}
-        <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '210mm', minHeight: '297mm' }}>
+        <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '210mm', height: '297mm' }}>
           <div ref={printContentRef}>
             {generatePrintContent()}
           </div>
