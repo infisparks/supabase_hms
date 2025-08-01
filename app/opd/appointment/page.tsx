@@ -213,7 +213,9 @@ const AppointmentPage = () => {
     setValue("name", p.name || "", { shouldValidate: true })
     setValue("phone", p.number !== undefined && p.number !== null ? String(p.number) : "", { shouldValidate: true })
     setValue("age", p.age ? Number(p.age) : undefined, { shouldValidate: true })
-    setValue("ageUnit", p.age_unit || "year", { shouldValidate: true }) // Always set from patient_detail
+    // Ensure ageUnit defaults to "year" if not provided or invalid
+    const ageUnit = p.age_unit && ["year", "month", "day"].includes(p.age_unit) ? p.age_unit : "year"
+    setValue("ageUnit", ageUnit, { shouldValidate: true })
     setValue("gender", p.gender || "", { shouldValidate: true })
     setValue("address", p.address || "")
     setValue("referredBy", "")
