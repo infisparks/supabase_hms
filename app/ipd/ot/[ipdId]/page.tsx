@@ -220,7 +220,8 @@ export default function OTPage() {
     setSaving(true);
     try {
       // Convert the date string to ISO format for database storage
-      const otDateISO = new Date(formData.otDate + 'T00:00:00').toISOString();
+      // Use the date as-is without timezone conversion to avoid date shifting
+      const otDateISO = formData.otDate + 'T00:00:00.000Z';
       
       const payload = {
         ipd_id: patientRecord.ipd_id,
