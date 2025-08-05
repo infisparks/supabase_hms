@@ -166,6 +166,18 @@ export default function PaymentTab({
                 )}
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date</label>
+                <input
+                  type="date"
+                  {...registerPayment("paymentDate")} // New field for payment date
+                  defaultValue={new Date().toISOString().split('T')[0]} // Set default to today's date
+                  className={`w-full px-3 py-2 rounded-lg border ${errorsPayment.paymentDate ? "border-red-500" : "border-gray-300"} focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                />
+                {errorsPayment.paymentDate && (
+                  <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentDate.message}</p>
+                )}
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment Type</label>
                 <select
                   {...registerPayment("paymentType")}
@@ -202,6 +214,7 @@ export default function PaymentTab({
                   <option value="deposit">Deposit</option>
                   <option value="settlement">Settlement</option>
                   <option value="refund">Refund</option>
+                  <option value="discount">Discount</option> {/* Added discount option */}
                 </select>
                 {errorsPayment.transactionType && (
                   <p className="text-red-500 text-xs mt-1">{errorsPayment.transactionType.message}</p>
