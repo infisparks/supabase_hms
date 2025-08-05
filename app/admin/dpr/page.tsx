@@ -45,6 +45,8 @@ interface KPIData {
   totalMinorOT: number;
   totalOTProcedures: number;
   totalDeaths: number;
+  totalCasualtyOPD: number; // NEW: Casualty OPD Count
+  totalConsultantOPD: number; // NEW: Consultant OPD Count
 }
 
 
@@ -80,6 +82,8 @@ const DPRPage = () => {
     totalMinorOT: 0,
     totalOTProcedures: 0,
     totalDeaths: 0,
+    totalCasualtyOPD: 0, // Initialize
+    totalConsultantOPD: 0, // Initialize
   });
 
   const [bedManagement, setBedManagement] = useState<BedManagement[]>([]);
@@ -170,6 +174,24 @@ const DPRPage = () => {
 
       // --- KPI Calculations ---
       const totalOPD = opdAppointments?.length || 0;
+
+      let totalCasualtyOPD = 0;
+      let totalConsultantOPD = 0;
+
+      opdAppointments?.forEach((appointment: any) => {
+        if (appointment.service_info && Array.isArray(appointment.service_info)) {
+          const isCasualty = appointment.service_info.some((service: any) =>
+            service.type?.toLowerCase() === 'casualty'
+          );
+          if (isCasualty) {
+            totalCasualtyOPD++;
+          } else {
+            totalConsultantOPD++;
+          }
+        }
+      });
+
+
       const totalIPD = ipdAdmissions?.length || 0;
 
       const totalDischarges = ipdAdmissions?.filter(ipd => {
@@ -204,6 +226,8 @@ const DPRPage = () => {
         totalMinorOT: minorOT,
         totalOTProcedures: totalOT,
         totalDeaths: totalDeaths,
+        totalCasualtyOPD: totalCasualtyOPD,
+        totalConsultantOPD: totalConsultantOPD,
       });
 
       // --- Bed Management Tab Data ---
@@ -404,7 +428,24 @@ const DPRPage = () => {
               font-weight: bold;
               color: #374151;
             }
-
+            /* Specific styles for the OPD breakdown in PDF */
+            .opd-breakdown-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 5px;
+              margin-top: 5px;
+            }
+            .opd-breakdown-item {
+                text-align: center;
+            }
+            .opd-breakdown-value {
+                font-size: 12px;
+                font-weight: bold;
+            }
+            .opd-breakdown-label {
+                font-size: 9px;
+                color: #6b7280;
+            }
 
           `}
         </style>
@@ -417,6 +458,17 @@ const DPRPage = () => {
           <div className="kpi-card">
             <div className="kpi-value">{kpiData.totalOPDAppointments}</div>
             <div className="kpi-label">Total OPD</div>
+            {/* NEW: OPD Breakdown for PDF */}
+            <div className="opd-breakdown-grid">
+              <div className="opd-breakdown-item">
+                <div className="opd-breakdown-value" style={{ color: '#dc2626' }}>{kpiData.totalCasualtyOPD}</div>
+                <div className="opd-breakdown-label">Casualty</div>
+              </div>
+              <div className="opd-breakdown-item">
+                <div className="opd-breakdown-value" style={{ color: '#4f46e5' }}>{kpiData.totalConsultantOPD}</div>
+                <div className="opd-breakdown-label">Consultant</div>
+              </div>
+            </div>
           </div>
           <div className="kpi-card">
             <div className="kpi-value">{kpiData.totalIPDAdmissions}</div>
@@ -510,13 +562,13 @@ const DPRPage = () => {
       try {
         // Generate PDF as blob instead of downloading
         const pdfBlob = await html2pdf().from(printContentRef.current).set(options).outputPdf('blob');
-        
+
         // Create blob URL
         const blobUrl = URL.createObjectURL(pdfBlob);
-        
+
         // Open PDF in new tab
         window.open(blobUrl, '_blank');
-        
+
         // Clean up blob URL after a delay
         setTimeout(() => {
           URL.revokeObjectURL(blobUrl);
@@ -600,6 +652,17 @@ const DPRPage = () => {
             <CardContent>
               <div className="text-3xl font-bold text-blue-900">{kpiData.totalOPDAppointments}</div>
               <p className="text-xs text-blue-600 mt-1">Appointments on {format(parseISO(selectedDate), 'MMM dd')}</p>
+              {/* NEW: OPD Breakdown for UI */}
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <div className="text-center">
+                  <div className="text-sm font-semibold text-red-600">{kpiData.totalCasualtyOPD}</div>
+                  <p className="text-xs text-red-600">Casualty</p>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm font-semibold text-indigo-600">{kpiData.totalConsultantOPD}</div>
+                  <p className="text-xs text-indigo-600">Consultant</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
