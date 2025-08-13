@@ -174,7 +174,7 @@ const Sidebar = () => {
               <Hospital className="h-6 w-6 text-blue-600" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-gray-900">MediCare</h2>
+              <h2 className="text-lg font-bold text-gray-900">Medford</h2>
               <p className="text-sm text-gray-600">Hospital Management</p>
             </div>
           </div>

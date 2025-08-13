@@ -6,7 +6,7 @@ import { Toaster } from '@/components/ui/sonner';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'MediCare Hospital Management System',
+  title: 'Medford Hospital Management System',
   description: 'Hospital Management System built with Next.js and Supabase',
 };
 

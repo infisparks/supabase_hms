@@ -58,7 +58,7 @@ const LoginPage = () => {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
             <Hospital className="h-8 w-8 text-blue-600" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">MediCare Hospital</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Medford Hospital</h1>
           <p className="text-gray-600">Management System</p>
         </div>
 
@@ -128,7 +128,7 @@ const LoginPage = () => {
 
         {/* Footer */}
         <div className="text-center mt-6 text-sm text-gray-500">
-          <p>&copy; 2025 MediCare Hospital Management System</p>
+          <p>&copy; 2025 Medford Hospital Management System</p>
         </div>
       </div>
     </div>
