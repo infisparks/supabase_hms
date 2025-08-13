@@ -161,8 +161,14 @@ const IPDAppointmentPage = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [showAvailability, setShowAvailability] = useState(false)
-  const [patientSuggestions, setPatientSuggestions] = useState<PatientDetail[]>([])
-  const [showSuggestions, setShowSuggestions] = useState(false)
+  // Removed name-based dropdown suggestions; we now search by UHID/Phone
+  // OPD-like search and edit states
+  const [searchUhIdInput, setSearchUhIdInput] = useState("")
+  const [searchPhoneInput, setSearchPhoneInput] = useState("")
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchedPatientResults, setSearchedPatientResults] = useState<PatientDetail[] | null>(null)
+  const [selectedPatient, setSelectedPatient] = useState<PatientDetail | null>(null)
+  const [isEditingPatient, setIsEditingPatient] = useState(false)
 
   const [formData, setFormData] = useState<IPDFormInput>({
     uhid: "", // Initialize uhid
@@ -312,6 +318,158 @@ const IPDAppointmentPage = () => {
     }
   }, [formData.uhid, fetchPatientDetailsByUHID]);
 
+  // Fill form with selected patient data (OPD-like)
+  const fillFormWithPatientData = useCallback((p: PatientDetail) => {
+    setFormData((prev) => ({
+      ...prev,
+      uhid: p.uhid || "",
+      name: p.name || "",
+      phone: p.number ?? "",
+      age: p.age ?? "",
+      ageUnit: p.age_unit || "years",
+      gender: p.gender,
+      address: p.address,
+    }))
+    setSelectedPatient(p)
+    setIsEditingPatient(false)
+  }, [])
+
+  // Reset selection and form for new patient entry
+  const resetForNewPatient = useCallback(() => {
+    setSelectedPatient(null)
+    setIsEditingPatient(false)
+    setSearchedPatientResults(null)
+    setSearchUhIdInput("")
+    setSearchPhoneInput("")
+  }, [])
+
+  // Search by UHID (full or counter-only)
+  const handleSearchByUhId = useCallback(async () => {
+    if (!searchUhIdInput.trim()) {
+      toast.error("Enter UHID or counter number to search.")
+      return
+    }
+    setIsSearching(true)
+    setSearchedPatientResults(null)
+    try {
+      const raw = searchUhIdInput.trim().toUpperCase()
+      const isCounterOnly = /^\d+$/.test(raw)
+      let query = supabase
+        .from("patient_detail")
+        .select("patient_id, name, number, age, age_unit, dob, gender, address, uhid")
+      if (isCounterOnly) {
+        const formattedCounter = raw.padStart(5, '0')
+        query = query.ilike("uhid", `%-${formattedCounter}`)
+      } else {
+        query = query.eq("uhid", raw)
+      }
+      const { data, error } = await query
+      if (error) throw error
+      if (!data || (Array.isArray(data) && data.length === 0)) {
+        toast.error("No patient found.")
+        return
+      }
+      // If one result, fill directly; else show list
+      if (Array.isArray(data)) {
+        if (data.length === 1) {
+          fillFormWithPatientData(data[0] as PatientDetail)
+          toast.success("Patient loaded.")
+        } else {
+          setSearchedPatientResults(data as PatientDetail[])
+          toast.info("Select patient from list.")
+        }
+      } else {
+        fillFormWithPatientData(data as unknown as PatientDetail)
+        toast.success("Patient loaded.")
+      }
+    } catch (e: any) {
+      console.error(e)
+      toast.error("UHID search failed.")
+    } finally {
+      setIsSearching(false)
+    }
+  }, [fillFormWithPatientData, searchUhIdInput])
+
+  // Search by phone number
+  const handleSearchByPhoneNumber = useCallback(async () => {
+    if (!searchPhoneInput.trim()) {
+      toast.error("Enter phone number to search.")
+      return
+    }
+    const phoneAsNumber = Number(searchPhoneInput.trim())
+    if (Number.isNaN(phoneAsNumber)) {
+      toast.error("Invalid phone number.")
+      return
+    }
+    setIsSearching(true)
+    setSearchedPatientResults(null)
+    try {
+      const { data, error } = await supabase
+        .from("patient_detail")
+        .select("patient_id, name, number, age, age_unit, dob, gender, address, uhid")
+        .eq("number", phoneAsNumber)
+      if (error) throw error
+      if (!data || data.length === 0) {
+        toast.error("No patients found with this phone number.")
+        return
+      }
+      if (data.length === 1) {
+        fillFormWithPatientData(data[0] as PatientDetail)
+        toast.success("Patient loaded.")
+      } else {
+        setSearchedPatientResults(data as PatientDetail[])
+        toast.info("Select patient from list.")
+      }
+    } catch (e: any) {
+      console.error(e)
+      toast.error("Phone search failed.")
+    } finally {
+      setIsSearching(false)
+    }
+  }, [searchPhoneInput, fillFormWithPatientData])
+
+  // Update existing patient details explicitly
+  const handleUpdatePatientDetails = useCallback(async () => {
+    if (!selectedPatient) return
+    setIsLoading(true)
+    try {
+      // Convert age to number or null; phone to number or null
+      const phoneNum = formData.phone !== null && formData.phone !== '' ? Number(formData.phone) : null
+      const ageNum = formData.age !== null && formData.age !== '' ? Number(formData.age) : null
+      const { error } = await supabase
+        .from("patient_detail")
+        .update({
+          name: String(formData.name).trim(),
+          number: phoneNum,
+          age: ageNum,
+          age_unit: formData.ageUnit,
+          gender: formData.gender,
+          address: formData.address,
+        })
+        .eq("patient_id", selectedPatient.patient_id)
+        .eq("uhid", selectedPatient.uhid)
+      if (error) throw error
+      // Update local selectedPatient and form
+      const updated: PatientDetail = {
+        ...selectedPatient,
+        name: String(formData.name).trim(),
+        number: phoneNum,
+        age: ageNum,
+        age_unit: formData.ageUnit,
+        gender: formData.gender,
+        address: formData.address,
+      }
+      setSelectedPatient(updated)
+      toast.success("Patient details updated.")
+      setIsEditingPatient(false)
+    } catch (e: any) {
+      console.error("Failed to update patient details:", e)
+      toast.error(`Failed to update patient details: ${e.message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [selectedPatient, formData])
+
   const fetchPatients = async () => {
     try {
       const { data, error } = await supabase
@@ -356,33 +514,11 @@ const IPDAppointmentPage = () => {
   }
 
   const handlePatientNameChange = (value: string) => {
-    setFormData((prev: IPDFormInput) => ({ ...prev, name: value, uhid: "" })); // Clear UHID when name changes to allow new UHID generation or selection
-
-    if (value.length > 0) {
-      const suggestions = patients
-        .filter((patient) => patient.name.toLowerCase().includes(value.toLowerCase()))
-        .slice(0, 5)
-      setPatientSuggestions(suggestions)
-      setShowSuggestions(suggestions.length > 0)
-    } else {
-      setPatientSuggestions([]);
-      setShowSuggestions(false)
-    }
+    // Keep simple behavior: update name and clear UHID if the user edits name (new patient case)
+    setFormData((prev: IPDFormInput) => ({ ...prev, name: value, uhid: "" }));
   }
 
-  const selectPatient = (patient: PatientDetail) => {
-    setFormData((prev: IPDFormInput) => ({
-      ...prev,
-      uhid: patient.uhid, // Set UHID here
-      name: patient.name,
-      phone: patient.number,
-      age: patient.age,
-      ageUnit: patient.age_unit || "years", // Set ageUnit, default to 'years'
-      gender: patient.gender,
-      address: patient.address,
-    }))
-    setShowSuggestions(false)
-  }
+  // Removed selectPatient() as name-based suggestions UI is removed
 
   const sendWhatsAppNotification = async (phoneNumber: string, message: string) => {
     // Basic validation to ensure phoneNumber is a string and not empty
@@ -768,6 +904,103 @@ Medford Hospital
   return (
     <Layout>
       <div className="space-y-8">
+        {/* Search Existing Patient (OPD-like) */}
+        <Card className="shadow-md rounded-lg border-none">
+          <CardHeader className="bg-blue-50 border-b border-blue-200 py-4">
+            <CardTitle className="flex items-center gap-3 text-lg text-blue-800">
+              Search Existing Patient
+              {selectedPatient && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={resetForNewPatient}
+                  className="ml-auto text-red-600 hover:text-red-700 flex items-center gap-1"
+                >
+                  <XCircle className="h-4 w-4" /> Clear Patient
+                </Button>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 space-y-6">
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="search-uhid">Search by UHID</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="search-uhid"
+                    placeholder="Enter UHID or counter number (e.g., MG-070625-00001 or 00001)"
+                    value={searchUhIdInput}
+                    onChange={(e) => setSearchUhIdInput(e.target.value)}
+                    disabled={isSearching || !!selectedPatient}
+                    className="h-10"
+                  />
+                  <Button onClick={handleSearchByUhId} disabled={isSearching || !!selectedPatient} className="min-w-[100px]">
+                    {isSearching ? "Searching..." : "Search"}
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="search-phone">Search by Phone</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="search-phone"
+                    placeholder="Enter 10-digit phone number"
+                    value={searchPhoneInput}
+                    onChange={(e) => setSearchPhoneInput(e.target.value)}
+                    disabled={isSearching || !!selectedPatient}
+                    className="h-10"
+                  />
+                  <Button onClick={handleSearchByPhoneNumber} disabled={isSearching || !!selectedPatient} className="min-w-[100px]">
+                    {isSearching ? "Searching..." : "Search"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {searchedPatientResults && (
+              <div className="space-y-2">
+                <Label>Select Patient from Results</Label>
+                <SearchableSelect
+                  options={searchedPatientResults.map((p) => ({ value: p.uhid, label: `${p.name} (${p.uhid}) – ${p.number ?? ''}` }))}
+                  value={""}
+                  onValueChange={(v) => {
+                    const sel = searchedPatientResults.find((p) => p.uhid === v)
+                    if (sel) {
+                      fillFormWithPatientData(sel)
+                      toast.success(`Selected: ${sel.name}`)
+                    }
+                  }}
+                  placeholder="Choose patient"
+                />
+              </div>
+            )}
+
+            {selectedPatient && (
+              <div className="bg-blue-100 p-4 rounded-lg flex items-center justify-between text-base text-blue-900 border border-blue-200">
+                <span>
+                  Selected Patient: <span className="font-semibold">{selectedPatient.name}</span> (UHID: <span className="font-mono font-bold">{selectedPatient.uhid}</span>)
+                </span>
+                <div className="flex gap-2">
+                  {!isEditingPatient ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => setIsEditingPatient(true)} className="text-blue-600 border-blue-500 hover:bg-blue-50">
+                      Edit Details
+                    </Button>
+                  ) : (
+                    <>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setIsEditingPatient(false)} className="text-gray-600 border-gray-500 hover:bg-gray-50">
+                        Cancel
+                      </Button>
+                      <Button type="button" size="sm" onClick={handleUpdatePatientDetails} disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white">
+                        {isLoading ? "Updating..." : "Update Details"}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
         {/* Header */}
         <div className="text-center bg-gradient-to-r from-blue-600 to-purple-600 text-white py-8 rounded-lg shadow-md">
           <h1 className="text-4xl font-bold mb-3">IPD Admission</h1>
@@ -785,42 +1018,18 @@ Medford Hospital
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="space-y-2 relative">
+                <div className="space-y-2">
                   <Label htmlFor="name">Patient Name</Label>
                   <Input
                     id="name"
                     placeholder="Enter patient name"
                     value={formData.name}
                     onChange={(e) => handlePatientNameChange(e.target.value)}
-                    onFocus={() => {
-                      if (formData.name.length > 0) {
-                        setPatientSuggestions(
-                          patients
-                            .filter((patient) => patient.name.toLowerCase().includes(formData.name.toLowerCase()))
-                            .slice(0, 5)
-                        );
-                        setShowSuggestions(true);
-                      }
-                    }}
-                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} // Delay hiding to allow click
                     required
                     autoComplete="off"
                     className="placeholder-gray-400"
+                    disabled={selectedPatient ? !isEditingPatient : false}
                   />
-                  {showSuggestions && (
-                    <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-40 overflow-y-auto">
-                      {patientSuggestions.map((patient) => (
-                        <div
-                          key={patient.uhid} // Use UHID as key
-                          className="p-2 hover:bg-gray-100 cursor-pointer"
-                          onMouseDown={() => selectPatient(patient)} // Use onMouseDown to trigger before onBlur
-                        >
-                          <div className="font-medium">{patient.name}</div>
-                          <div className="text-sm text-gray-600">{patient.number} - {patient.uhid}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone Number</Label>
@@ -832,6 +1041,7 @@ Medford Hospital
                     required
                     autoComplete="off"
                     className="placeholder-gray-400"
+                    disabled={selectedPatient ? !isEditingPatient : false}
                   />
                 </div>
                 <div className="space-y-2">
@@ -844,6 +1054,7 @@ Medford Hospital
                     onBlur={(e) => fetchPatientDetailsByUHID(e.target.value)} // Fetch details on blur
                     autoComplete="off"
                     className={`placeholder-gray-400 ${formData.uhid ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                    disabled={!!selectedPatient}
                   />
                 </div>
               </div>
@@ -858,6 +1069,7 @@ Medford Hospital
                     value={formData.age || ''}
                     onChange={(e) => setFormData((prev: IPDFormInput) => ({ ...prev, age: e.target.value }))}
                     className="placeholder-gray-400"
+                    disabled={selectedPatient ? !isEditingPatient : false}
                   />
                 </div>
                 <div className="space-y-2">
@@ -867,6 +1079,7 @@ Medford Hospital
                     value={formData.ageUnit}
                     onValueChange={(value) => setFormData((prev: IPDFormInput) => ({ ...prev, ageUnit: value }))}
                     placeholder="Select age unit"
+                    disabled={selectedPatient ? !isEditingPatient : false}
                   />
                 </div>
                 <div className="space-y-2">
@@ -876,6 +1089,7 @@ Medford Hospital
                     value={formData.gender || ''} // Handle null for UI
                     onValueChange={(value) => setFormData((prev: IPDFormInput) => ({ ...prev, gender: value }))}
                     placeholder="Select gender"
+                    disabled={selectedPatient ? !isEditingPatient : false}
                   />
                 </div>
               </div>
@@ -885,9 +1099,10 @@ Medford Hospital
                   id="address"
                   placeholder="Enter patient address"
                   value={formData.address || ''} // Handle null for UI
-                  onChange={(e) => setFormData((prev: IPDFormInput) => ({ ...prev, address: e.target.value }))}
-                  autoComplete="off"
-                  className="placeholder-gray-400"
+                    onChange={(e) => setFormData((prev: IPDFormInput) => ({ ...prev, address: e.target.value }))}
+                    autoComplete="off"
+                    className="placeholder-gray-400"
+                    disabled={selectedPatient ? !isEditingPatient : false}
                 />
               </div>
             </CardContent>

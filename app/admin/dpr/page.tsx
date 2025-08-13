@@ -302,7 +302,7 @@ const DPRPage = () => {
         padding: '10px 15px', // Top/Bottom, Left/Right
         color: '#333',
         width: '210mm',      // A4 width
-        height: '297mm',     // A4 height - full height
+        height: '296mm',     // Slightly less than full A4 height to avoid overflow rounding
         boxSizing: 'border-box',
         position: 'relative',
         backgroundImage: `url(${typeof window !== 'undefined' ? window.location.origin : ''}/letterhead.png)`,
@@ -310,6 +310,7 @@ const DPRPage = () => {
         backgroundPosition: 'center center',
         backgroundSize: '210mm 297mm', // Exact A4 dimensions
         fontSize: '11px', // Base font size for report, can be adjusted further
+        overflow: 'hidden', // Prevent content spill that can trigger extra pages
       }}>
         <style>
           {`
@@ -557,22 +558,22 @@ const DPRPage = () => {
           letterRendering: true,
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all'] },
       };
 
       try {
-        // Generate PDF as blob instead of downloading
-        const pdfBlob = await html2pdf().from(printContentRef.current).set(options).outputPdf('blob');
+        // Build PDF, remove any trailing blank page, and open in new tab
+        const worker = html2pdf().from(printContentRef.current).set(options).toPdf();
+        const pdf = await worker.get('pdf');
 
-        // Create blob URL
-        const blobUrl = URL.createObjectURL(pdfBlob);
+        const totalPages = pdf.internal.getNumberOfPages();
+        if (totalPages > 1) {
+          // For DPR we expect a single page; remove any unintended trailing page
+          pdf.deletePage(totalPages);
+        }
 
-        // Open PDF in new tab
+        const blobUrl = pdf.output('bloburl');
         window.open(blobUrl, '_blank');
-
-        // Clean up blob URL after a delay
-        setTimeout(() => {
-          URL.revokeObjectURL(blobUrl);
-        }, 1000);
       } catch (error) {
         console.error('Error generating PDF:', error);
         // Fallback to original download method

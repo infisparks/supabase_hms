@@ -77,6 +77,7 @@ import {
 } from "@/action/appointment"
 import { openBillInNewTabProgrammatically } from "./bill-generator"
 import Layout from "@/components/global/Layout"
+import { supabase } from "@/lib/supabase"
 
 // Helper functions (kept at top-level scope)
 function formatAMPM(date: Date): string {
@@ -120,6 +121,7 @@ const AppointmentPage = () => {
   const [searchedPatientResults, setSearchedPatientResults] = useState<PatientDetail[] | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [selectedPatient, setSelectedPatient] = useState<PatientDetail | null>(null)
+  const [isEditingPatient, setIsEditingPatient] = useState(false)
 
   // State to track which charges input is currently being edited
   const [editingChargeIndex, setEditingChargeIndex] = useState<number | null>(null)
@@ -233,6 +235,7 @@ const AppointmentPage = () => {
     setSearchUhIdInput("")
     setSearchPhoneInput("")
     setSearchedPatientResults(null)
+    setIsEditingPatient(false) // Reset editing mode when loading new patient
     if (nameInputRef.current) nameInputRef.current.value = p.name || ""
     if (phoneInputRef.current) phoneInputRef.current.value = p.number ? String(p.number) : ""
   }
@@ -270,6 +273,7 @@ const AppointmentPage = () => {
     setSearchPhoneInput("")
     setEditingChargeIndex(null) // Reset editing state on form reset
     setEditingServiceNameIndex(null) // Reset editing state for service name
+    setIsEditingPatient(false) // Reset editing mode
   }, [reset])
 
   useEffect(() => {
@@ -281,6 +285,8 @@ const AppointmentPage = () => {
       setIsSearching(false)
     }
   }, [activeTab, selectedPatient, resetFormForNewPatient])
+
+
 
   // Total modality charges will update automatically because watchedModalities is a dependency
   const totalModalityCharges = useMemo(
@@ -630,6 +636,54 @@ const AppointmentPage = () => {
     }
   }
 
+  const handleUpdatePatientDetails = async () => {
+    if (!selectedPatient) return
+    
+    setIsLoading(true)
+    try {
+      const formData = getValues()
+      
+      // Update patient details in the database
+      const { error } = await supabase
+        .from("patient_detail")
+        .update({
+          name: formData.name.trim(),
+          number: Number(formData.phone) || null,
+          age: formData.age !== undefined ? Number(formData.age) : null,
+          age_unit: formData.ageUnit || null,
+          gender: formData.gender || null,
+          address: formData.address?.trim() || null,
+        })
+        .eq("patient_id", selectedPatient.patient_id)
+        .eq("uhid", selectedPatient.uhid)
+
+      if (error) {
+        console.error("Error updating patient details:", error)
+        throw error
+      }
+
+      // Update the selectedPatient state with new data
+      const updatedPatient: PatientDetail = {
+        ...selectedPatient,
+        name: formData.name.trim(),
+        number: formData.phone || "",
+        age: formData.age !== undefined && !isNaN(Number(formData.age)) ? Number(formData.age) : undefined,
+        age_unit: formData.ageUnit || undefined,
+        gender: formData.gender || undefined,
+        address: formData.address?.trim() || undefined,
+      }
+      setSelectedPatient(updatedPatient)
+      
+      setIsEditingPatient(false)
+      toast.success("Patient details updated successfully!")
+    } catch (error: any) {
+      console.error("Failed to update patient details:", error)
+      toast.error(`Failed to update patient details: ${error.message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const bookOnCallToOnCall = (appointment: OnCallAppointment) => {
     // FIX: Add null check for patient_detail
     if (appointment.patient_detail) {
@@ -762,6 +816,7 @@ const AppointmentPage = () => {
                 <Label htmlFor="search-phone">Search by Phone</Label>
                 <div className="flex gap-2">
                   <Input
+                    key={`phone-${isEditingPatient}`}
                     id="search-phone"
                     placeholder="Enter 10-digit phone number"
                     value={searchPhoneInput}
@@ -816,7 +871,50 @@ const AppointmentPage = () => {
                     Selected Patient: <span className="font-semibold">{selectedPatient.name}</span> (UHID:{" "}
                     <span className="font-mono font-bold">{selectedPatient.uhid}</span>)
                   </span>
+                  <div className="flex gap-2">
+                    {!isEditingPatient ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setIsEditingPatient(true)
+                        }}
+                        className="text-blue-600 border-blue-500 hover:bg-blue-50"
+                      >
+                        Edit Details
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsEditingPatient(false)}
+                          className="text-gray-600 border-gray-500 hover:bg-gray-50"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleUpdatePatientDetails}
+                          disabled={isLoading}
+                          className="bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          {isLoading ? "Updating..." : "Update Details"}
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
+                {!isEditingPatient && (
+                  <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                    <p className="text-sm text-blue-700">
+                      💡 <strong>Tip:</strong> Click "Edit Details" to modify this patient's information before booking the appointment.
+                    </p>
+                  </div>
+                )}
               </>
             )}
           </CardContent>
@@ -856,9 +954,21 @@ const AppointmentPage = () => {
                         <CardTitle className="flex items-center gap-3 text-xl text-blue-700">
                           <User className="h-6 w-6" />
                           Patient Information
+                          {isEditingPatient && (
+                            <Badge variant="secondary" className="ml-2 bg-yellow-100 text-yellow-800 border-yellow-300">
+                              Editing Mode
+                            </Badge>
+                          )}
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-6">
+                        {isEditingPatient && selectedPatient && (
+                          <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                            <p className="text-sm text-yellow-700">
+                              ✏️ <strong>Editing Mode:</strong> You can now modify the patient's details. Click "Update Details" to save changes.
+                            </p>
+                          </div>
+                        )}
                         <div className="grid lg:grid-cols-3 md:grid-cols-2 gap-6">
                           {/* NAME */}
                           <div className="space-y-2">
@@ -867,18 +977,28 @@ const AppointmentPage = () => {
                             </Label>
                             <div className="relative">
                               <PersonIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                              <Input
-                                id="patient-name"
-                                type="text"
-                                {...nameField}
-                                ref={(el) => {
-                                  nameField.ref(el)
-                                  nameInputRef.current = el
-                                }}
-                                placeholder="Enter patient name"
-                                className={`pl-10 h-10 ${errors.name ? "border-red-500" : ""}`}
-                                autoComplete="off"
-                                disabled={!!selectedPatient}
+                              <Controller
+                                control={control}
+                                name="name"
+                                rules={{ required: "Name is required" }}
+                                render={({ field }) => (
+                                  <Input
+                                    key={`name-${isEditingPatient}`}
+                                    id="patient-name"
+                                    type="text"
+                                    {...field}
+                                    ref={(el) => {
+                                      field.ref(el)
+                                      nameInputRef.current = el
+                                    }}
+                                    placeholder="Enter patient name"
+                                    className={`pl-10 h-10 ${errors.name ? "border-red-500" : ""} ${
+                                      isEditingPatient && selectedPatient ? "border-yellow-400 bg-yellow-50" : ""
+                                    }`}
+                                    autoComplete="off"
+                                    disabled={selectedPatient ? !isEditingPatient : false}
+                                  />
+                                )}
                               />
                             </div>
                             {errors.name && <p className="text-red-500 text-sm">{errors.name.message}</p>}
@@ -890,18 +1010,31 @@ const AppointmentPage = () => {
                             </Label>
                             <div className="relative">
                               <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                              <Input
-                                id="phone-number"
-                                type="tel"
-                                {...phoneField}
-                                ref={(el) => {
-                                  phoneField.ref(el)
-                                  phoneInputRef.current = el
+                              <Controller
+                                control={control}
+                                name="phone"
+                                rules={{
+                                  required: "Phone number is required",
+                                  pattern: { value: /^[0-9]{10}$/, message: "Enter a valid 10-digit number" },
                                 }}
-                                placeholder="10-digit number"
-                                className={`pl-10 h-10 ${errors.phone ? "border-red-500" : ""}`}
-                                autoComplete="off"
-                                disabled={!!selectedPatient}
+                                render={({ field }) => (
+                                  <Input
+                                    key={`phone-${isEditingPatient}`}
+                                    id="phone-number"
+                                    type="tel"
+                                    {...field}
+                                    ref={(el) => {
+                                      field.ref(el)
+                                      phoneInputRef.current = el
+                                    }}
+                                    placeholder="10-digit number"
+                                    className={`pl-10 h-10 ${errors.phone ? "border-red-500" : ""} ${
+                                      isEditingPatient && selectedPatient ? "border-yellow-400 bg-yellow-50" : ""
+                                    }`}
+                                    autoComplete="off"
+                                    disabled={selectedPatient ? !isEditingPatient : false}
+                                  />
+                                )}
                               />
                             </div>
                             {errors.phone && <p className="text-red-500 text-sm">{errors.phone.message}</p>}
@@ -914,18 +1047,28 @@ const AppointmentPage = () => {
                               </Label>
                               <div className="relative">
                                 <Cake className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                                <Input
-                                  id="patient-age"
-                                  type="number"
-                                  {...register("age", {
+                                <Controller
+                                  control={control}
+                                  name="age"
+                                  rules={{
                                     required: "Age is required",
                                     min: { value: 0, message: "Positive value only" },
-                                    valueAsNumber: true,
-                                  })}
-                                  placeholder="Age"
-                                  className={`pl-10 h-10 ${errors.age ? "border-red-500" : ""}`}
-                                  onWheel={(e) => e.currentTarget.blur()}
-                                  disabled={!!selectedPatient}
+                                  }}
+                                  render={({ field }) => (
+                                    <Input
+                                      key={`age-${isEditingPatient}`}
+                                      id="patient-age"
+                                      type="number"
+                                      {...field}
+                                      onChange={(e) => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
+                                      placeholder="Age"
+                                      className={`pl-10 h-10 ${errors.age ? "border-red-500" : ""} ${
+                                        isEditingPatient && selectedPatient ? "border-yellow-400 bg-yellow-50" : ""
+                                      }`}
+                                      onWheel={(e) => e.currentTarget.blur()}
+                                      disabled={selectedPatient ? !isEditingPatient : false}
+                                    />
+                                  )}
                                 />
                               </div>
                               {errors.age && <p className="text-red-500 text-sm">{errors.age.message}</p>}
@@ -942,7 +1085,7 @@ const AppointmentPage = () => {
                                   <Select
                                     onValueChange={field.onChange}
                                     value={field.value}
-                                    disabled={!!selectedPatient}
+                                    disabled={selectedPatient ? !isEditingPatient : false}
                                   >
                                     <SelectTrigger
                                       id="age-unit"
@@ -975,7 +1118,7 @@ const AppointmentPage = () => {
                               name="gender"
                               rules={{ required: "Gender required" }}
                               render={({ field }) => (
-                                <Select onValueChange={field.onChange} value={field.value} disabled={!!selectedPatient}>
+                                <Select onValueChange={field.onChange} value={field.value} disabled={selectedPatient ? !isEditingPatient : false}>
                                   <SelectTrigger
                                     id="patient-gender"
                                     className={`h-10 ${errors.gender ? "border-red-500" : ""}`}
@@ -1058,12 +1201,20 @@ const AppointmentPage = () => {
                               </Label>
                               <div className="relative">
                                 <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
-                                <Textarea
-                                  id="address"
-                                  {...register("address")}
-                                  placeholder="Enter address (optional)"
-                                  className="pl-10 min-h-[60px]"
-                                  disabled={!!selectedPatient}
+                                <Controller
+                                  control={control}
+                                  name="address"
+                                  render={({ field }) => (
+                                    <Textarea
+                                      id="address"
+                                      {...field}
+                                      placeholder="Enter address (optional)"
+                                      className={`pl-10 min-h-[60px] ${
+                                        isEditingPatient && selectedPatient ? "border-yellow-400 bg-yellow-50" : ""
+                                      }`}
+                                      disabled={selectedPatient ? !isEditingPatient : false}
+                                    />
+                                  )}
                                 />
                               </div>
                             </div>
