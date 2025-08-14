@@ -596,28 +596,7 @@ const DPRPage = () => {
           </div>
         </div>
 
-        {/* NEW: Service Breakdown for PDF */}
-        <div className="ot-card">
-          <div className="section-title">Service Breakdown</div>
-          <div className="ot-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', marginTop: '8px' }}>
-            <div className="ot-item">
-              <div className="ot-value">{kpiData.totalXray}</div>
-              <div className="ot-label">X-ray</div>
-            </div>
-            <div className="ot-item">
-              <div className="ot-value">{kpiData.totalDialysis}</div>
-              <div className="ot-label">Dialysis</div>
-            </div>
-            <div className="ot-item">
-              <div className="ot-value">{kpiData.totalCasualtyOPD + kpiData.totalConsultantOPD}</div>
-              <div className="ot-label">Total OPD Appointments</div>
-            </div>
-            <div className="ot-item">
-              <div className="ot-value">{kpiData.totalPathology}</div>
-              <div className="ot-label">Pathology</div>
-            </div>
-          </div>
-        </div>
+        
 
         <div className="bed-section">
           <div className="section-title">Bed Management Status</div>

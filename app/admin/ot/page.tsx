@@ -53,7 +53,7 @@ interface OtDetailsSupabase {
   ot_type: "Major" | "Minor";
   ot_notes: string | null;
   ot_date: string; // ISO string
-  created_at: string; // This column is used for date filtering now
+  created_at: string; // Creation timestamp (not used for date filtering)
   doctor_id: number | null;
 }
 
@@ -122,8 +122,8 @@ export default function OTBreakdownPage() {
   const dailyOTCounts = useMemo(() => {
     const counts: { [date: string]: number } = {};
     otRecords.forEach(record => {
-      if (record.created_at) {
-        const date = format(parseISO(record.created_at), 'yyyy-MM-dd');
+      if (record.ot_date) {
+        const date = format(parseISO(record.ot_date), 'yyyy-MM-dd');
         counts[date] = (counts[date] || 0) + 1;
       }
     });
@@ -205,13 +205,13 @@ export default function OTBreakdownPage() {
         query = query.eq('doctor_id', filters.doctorId);
       }
       if (filters.startDate) {
-        query = query.gte('created_at', filters.startDate);
+        query = query.gte('ot_date', filters.startDate);
       }
       if (filters.endDate) {
-        query = query.lte('created_at', filters.endDate + 'T23:59:59.999');
+        query = query.lte('ot_date', filters.endDate + 'T23:59:59.999');
       }
 
-      query = query.order('created_at', { ascending: false });
+      query = query.order('ot_date', { ascending: false });
 
       const { data: otData, error: otError } = await query.returns<OTRecordWithDetails[]>();
 
@@ -322,7 +322,7 @@ export default function OTBreakdownPage() {
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                   <div>
-                    <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">Start Date (Created At)</label>
+                    <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">Start Date (OT Date)</label>
                     <input
                       type="date"
                       id="startDate"
@@ -333,7 +333,7 @@ export default function OTBreakdownPage() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">End Date (Created At)</label>
+                    <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">End Date (OT Date)</label>
                     <input
                       type="date"
                       id="endDate"

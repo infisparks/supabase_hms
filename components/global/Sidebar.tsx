@@ -95,7 +95,7 @@ const Sidebar = () => {
           { title: 'Patient Admin', href: '/admin/patient-admin' },
           { title: 'DPR', href: '/admin/dpr' },
           { title: 'OT', href: '/admin/ot' },
-          { title: 'Add Service', href: '/dashboard/add-service' },
+          // { title: 'Add Service', href: '/dashboard/add-service' },
         ]
       },
       {

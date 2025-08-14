@@ -451,6 +451,14 @@ export default function IPDAdminPage() {
     }
   }, [patients])
 
+  // Helper function to get discharge type from discharge_summaries array
+  const getDischargeType = (dischargeSummaries: any) => {
+    if (Array.isArray(dischargeSummaries) && dischargeSummaries.length > 0) {
+      return dischargeSummaries[0]?.discharge_type || null;
+    }
+    return null;
+  };
+
   // Filters patients based on search term and discharge status (applied after date filtering)
   const filteredPatients = useMemo(() => {
     let filtered = patients
@@ -691,14 +699,6 @@ export default function IPDAdminPage() {
       </Layout>
     )
   }
-
-  // Helper function to get discharge type from discharge_summaries array
-  const getDischargeType = (dischargeSummaries: any) => {
-    if (Array.isArray(dischargeSummaries) && dischargeSummaries.length > 0) {
-      return dischargeSummaries[0]?.discharge_type || null;
-    }
-    return null;
-  };
 
   // Helper function to get discharge status and styling
   const getDischargeStatus = (dischargeDate: string | null | undefined, bedStatus: string | null | undefined, dischargeType: string | null | undefined) => {
