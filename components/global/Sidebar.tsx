@@ -94,6 +94,7 @@ const Sidebar = () => {
           { title: 'IPD Admin', href: '/admin/ipd-admin' },
           { title: 'Patient Admin', href: '/admin/patient-admin' },
           { title: 'DPR', href: '/admin/dpr' },
+          { title: 'OT', href: '/admin/ot' },
           { title: 'Add Service', href: '/dashboard/add-service' },
         ]
       },
@@ -114,6 +115,7 @@ const Sidebar = () => {
           { title: 'IPD Management', href: '/ipd/management' },
           { title: 'BED Management', href: '/ipd/bed-management' },
           { title: 'Add Doctor', href: '/ipd/add-doctor' },
+          { title: 'Today  Amount', href: '/amount' },
         ]
       },
     ];
@@ -136,6 +138,7 @@ const Sidebar = () => {
           { title: 'IPD Management', href: '/ipd/management' },
           { title: 'BED Management', href: '/ipd/bed-management' },
           { title: 'Add Doctor', href: '/ipd/add-doctor' },
+          { title: 'Today  Amount', href: '/amount' },
         ]
       },
     ];

@@ -5,8 +5,8 @@ import Layout from "@/components/global/Layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useState, useEffect, useMemo, useCallback } from "react"
 // Import parseISO from date-fns to correctly parse ISO strings as local
-import { format, isSameDay, subDays, startOfDay, endOfDay, parseISO } from "date-fns"
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
+import { format, isSameDay, subDays, startOfDay, endOfDay, parseISO, addDays, differenceInDays } from "date-fns"
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from "recharts"
 import {
   Search,
   Trash2,
@@ -18,6 +18,7 @@ import {
   Filter,
   IndianRupeeIcon,
   TrendingUp,
+  UserCheck,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -35,6 +36,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { supabase } from "@/lib/supabase"
+
+// Register Chart.js components for doctor breakdown chart
+import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip as ChartTooltip, Legend } from "chart.js"
+import { Bar } from "react-chartjs-2"
+ChartJS.register(BarElement, CategoryScale, LinearScale, ChartTooltip, Legend)
 
 interface IModality {
   charges: number
@@ -98,10 +104,20 @@ interface DashboardStats {
   totalRadiology: number
 }
 
-type DateFilter = "today" | "7days"
+type DateFilter = "today" | "7days" | "custom"
+
+interface FilterState {
+  filterType: DateFilter
+  startDate: string
+  endDate: string
+}
 
 const AdminDashboardPage: React.FC = () => {
-  const [dateFilter, setDateFilter] = useState<DateFilter>("7days")
+  const [filters, setFilters] = useState<FilterState>({
+    filterType: "7days",
+    startDate: "",
+    endDate: "",
+  })
   const [opdAppointments, setOpdAppointments] = useState<IOPDEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -144,12 +160,23 @@ const AdminDashboardPage: React.FC = () => {
   // --- End of the fix ---
 
   const fetchOPDAppointments = useCallback(
-    async (filter: DateFilter) => {
+    async (filterType: DateFilter, startDate?: string, endDate?: string) => {
       const isRefresh = !loading
       if (isRefresh) setRefreshing(true)
 
       try {
-        const dateRange = getDateRange(filter)
+        let dateRange: { start: string; end: string }
+        
+        if (filterType === "custom" && startDate && endDate) {
+          const start = startOfDay(parseISO(startDate))
+          const end = endOfDay(parseISO(endDate))
+          dateRange = {
+            start: format(start, "yyyy-MM-dd HH:mm:ss.SSSSSS"),
+            end: format(end, "yyyy-MM-dd HH:mm:ss.SSSSSS"),
+          }
+        } else {
+          dateRange = getDateRange(filterType)
+        }
 
         const { data, error } = await supabase
           .from("opd_registration")
@@ -229,9 +256,24 @@ const AdminDashboardPage: React.FC = () => {
     [getDateRange, loading],
   )
 
+  // Set default dates for last 7 days
   useEffect(() => {
-    fetchOPDAppointments(dateFilter)
-  }, [dateFilter, fetchOPDAppointments])
+    const now = new Date()
+    const sevenDaysAgo = subDays(now, 6)
+    setFilters(prev => ({
+      ...prev,
+      startDate: format(sevenDaysAgo, "yyyy-MM-dd"),
+      endDate: format(now, "yyyy-MM-dd"),
+    }))
+  }, [])
+
+  useEffect(() => {
+    if (filters.filterType === "custom" && filters.startDate && filters.endDate) {
+      fetchOPDAppointments(filters.filterType, filters.startDate, filters.endDate)
+    } else {
+      fetchOPDAppointments(filters.filterType)
+    }
+  }, [filters, fetchOPDAppointments])
 
   const dashboardStats = useMemo((): DashboardStats => {
     const paymentBreakdown: PaymentSummary = {
@@ -296,30 +338,118 @@ const AdminDashboardPage: React.FC = () => {
 
   const appointmentChartData = useMemo(() => {
     const now = new Date()
-    const days =
-      dateFilter === "today"
-        ? [startOfDay(now)]
-        : Array.from({ length: 7 }, (_, i) => startOfDay(subDays(now, 6 - i)))
+    let days: Date[]
+    
+    if (filters.filterType === "today") {
+      days = [startOfDay(now)]
+    } else if (filters.filterType === "custom" && filters.startDate && filters.endDate) {
+      const start = parseISO(filters.startDate)
+      const end = parseISO(filters.endDate)
+      const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+      days = Array.from({ length: diff + 1 }, (_, i) => startOfDay(addDays(start, i)))
+    } else {
+      // 7 days default
+      days = Array.from({ length: 7 }, (_, i) => startOfDay(subDays(now, 6 - i)))
+    }
 
     const chartData = days.map((day) => {
-      // For charting and display, you still need to parse the stored string to compare.
-      // The instruction "don't parse the date take as it is same as database" mainly
-      // applies to the *query* to the database. For client-side logic like chart data,
-      // you need Date objects for `isSameDay`.
       const appointmentCount = opdAppointments.filter((appt) => isSameDay(parseISO(appt.createdAt), day)).length
       const revenueCount = opdAppointments
         .filter((appt) => isSameDay(parseISO(appt.createdAt), day))
         .reduce((acc, appt) => acc + appt.payment.totalPaid, 0)
 
       return {
-        date: format(day, dateFilter === "today" ? "HH:mm" : "MMM dd"),
+        date: format(day, filters.filterType === "today" ? "HH:mm" : "MMM dd"),
         appointments: appointmentCount,
         revenue: revenueCount,
       }
     })
 
     return chartData
-  }, [opdAppointments, dateFilter])
+  }, [opdAppointments, filters])
+
+  // Doctor consultation breakdown data
+  const doctorConsultations = useMemo(() => {
+    const map = new Map<string, number>()
+    opdAppointments.forEach((a) =>
+      a.modalities
+        .filter((m) => m.type === "consultation" && m.doctor)
+        .forEach((m) => map.set(m.doctor!, (map.get(m.doctor!) || 0) + 1)),
+    )
+    return Array.from(map.entries())
+      .map(([doctorName, count]) => ({ doctorName, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [opdAppointments])
+
+  const doctorConsultChartData = useMemo(() => {
+    const top = doctorConsultations.slice(0, 10)
+    return {
+      labels: top.map((d) => d.doctorName),
+      datasets: [
+        {
+          label: "Consultations",
+          data: top.map((d) => d.count),
+          backgroundColor: "rgba(75,192,192,0.6)",
+          borderWidth: 1,
+        },
+      ],
+    }
+  }, [doctorConsultations])
+
+  // Specialist consultation breakdown data
+  const specialistConsultations = useMemo(() => {
+    const map = new Map<string, number>()
+    opdAppointments.forEach((a) =>
+      a.modalities
+        .filter((m) => m.type === "consultation" && m.specialist)
+        .forEach((m) => map.set(m.specialist!, (map.get(m.specialist!) || 0) + 1)),
+    )
+    return Array.from(map.entries())
+      .map(([specialistName, count]) => ({ specialistName, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [opdAppointments])
+
+  const specialistConsultChartData = useMemo(() => {
+    const top = specialistConsultations.slice(0, 10)
+    return {
+      labels: top.map((d) => d.specialistName),
+      datasets: [
+        {
+          label: "Consultations",
+          data: top.map((d) => d.count),
+          backgroundColor: "rgba(255,99,132,0.6)",
+          borderWidth: 1,
+        },
+      ],
+    }
+  }, [specialistConsultations])
+
+  // Service type breakdown data (followup, new patient, etc.)
+  const serviceTypeConsultations = useMemo(() => {
+    const map = new Map<string, number>()
+    opdAppointments.forEach((a) =>
+      a.modalities
+        .filter((m) => m.type === "consultation" && m.visitType)
+        .forEach((m) => map.set(m.visitType!, (map.get(m.visitType!) || 0) + 1)),
+    )
+    return Array.from(map.entries())
+      .map(([visitType, count]) => ({ visitType, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [opdAppointments])
+
+  const serviceTypeChartData = useMemo(() => {
+    return {
+      labels: serviceTypeConsultations.map((d) => d.visitType),
+      datasets: [
+        {
+          label: "Consultations",
+          data: serviceTypeConsultations.map((d) => d.count),
+          backgroundColor: "rgba(54,162,235,0.6)",
+          borderWidth: 1,
+        },
+      ],
+    }
+  }, [serviceTypeConsultations])
 
   const filteredAppointments = useMemo(() => {
     if (!searchQuery.trim()) return opdAppointments
@@ -376,7 +506,7 @@ const AdminDashboardPage: React.FC = () => {
       toast.success("Appointment deleted successfully!")
       setDeleteDialogOpen(false)
       setAppointmentToDelete(null)
-      fetchOPDAppointments(dateFilter)
+              fetchOPDAppointments(filters.filterType)
     } catch (error) {
       console.error("Error deleting appointment:", error)
       toast.error("Failed to delete appointment")
@@ -384,7 +514,59 @@ const AdminDashboardPage: React.FC = () => {
   }
 
   const handleRefresh = () => {
-    fetchOPDAppointments(dateFilter)
+    if (filters.filterType === "custom" && filters.startDate && filters.endDate) {
+      fetchOPDAppointments(filters.filterType, filters.startDate, filters.endDate)
+    } else {
+      fetchOPDAppointments(filters.filterType)
+    }
+  }
+
+  const handleDateRangeChange = (startStr: string, endStr: string) => {
+    if (startStr && endStr) {
+      const startDate = parseISO(startStr)
+      const endDate = parseISO(endStr)
+
+      const diff = differenceInDays(endDate, startDate)
+      if (diff > 30) {
+        toast.error("Date range cannot exceed 30 days")
+        const maxEnd = addDays(startDate, 30)
+        setFilters((p) => ({
+          ...p,
+          startDate: startStr,
+          endDate: format(maxEnd, "yyyy-MM-dd"),
+          filterType: "custom",
+        }))
+      } else {
+        setFilters((p) => ({
+          ...p,
+          startDate: startStr,
+          endDate: endStr,
+          filterType: "custom",
+        }))
+      }
+    } else {
+      setFilters((p) => ({ ...p, startDate: startStr, endDate: endStr }))
+    }
+  }
+
+  const handleFilterChange = (upd: Partial<FilterState>) => {
+    if (upd.filterType === "today") {
+      setFilters((p) => ({
+        ...p,
+        filterType: "today",
+        startDate: "",
+        endDate: "",
+      }))
+    } else if (upd.filterType === "7days") {
+      setFilters((p) => ({
+        ...p,
+        filterType: "7days",
+        startDate: "",
+        endDate: "",
+      }))
+    } else {
+      setFilters((p) => ({ ...p, ...upd }))
+    }
   }
 
   if (loading) {
@@ -410,11 +592,15 @@ const AdminDashboardPage: React.FC = () => {
               <div>
                 <h1 className="text-4xl font-bold text-gray-900 mb-2">OPD Admin Dashboard</h1>
                 <p className="text-gray-600">
-                  {dateFilter === "today" ? "Today's" : "Last 7 days"} comprehensive payment & appointment analytics
+                  {filters.filterType === "today" 
+                    ? "Today's" 
+                    : filters.filterType === "custom" 
+                    ? `${format(parseISO(filters.startDate), "MMM dd")} to ${format(parseISO(filters.endDate), "MMM dd, yyyy")}`
+                    : "Last 7 days"} comprehensive payment & appointment analytics
                 </p>
               </div>
               <div className="flex gap-3">
-                <Select value={dateFilter} onValueChange={(value: DateFilter) => setDateFilter(value)}>
+                <Select value={filters.filterType} onValueChange={(value: DateFilter) => setFilters(prev => ({ ...prev, filterType: value }))}>
                   <SelectTrigger className="w-40">
                     <Filter className="h-4 w-4 mr-2" />
                     <SelectValue />
@@ -422,8 +608,39 @@ const AdminDashboardPage: React.FC = () => {
                   <SelectContent>
                     <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="7days">Last 7 Days</SelectItem>
+                    <SelectItem value="custom">Custom Range</SelectItem>
                   </SelectContent>
                 </Select>
+                
+                {filters.filterType === "custom" && (
+                  <div className="flex gap-2 items-center">
+                    <Input
+                      type="date"
+                      value={filters.startDate}
+                      onChange={(e) => handleDateRangeChange(e.target.value, filters.endDate)}
+                      className="w-40"
+                    />
+                    <span className="text-gray-500">to</span>
+                    <Input
+                      type="date"
+                      value={filters.endDate}
+                      onChange={(e) => handleDateRangeChange(filters.startDate, e.target.value)}
+                      className="w-40"
+                    />
+                    <Button 
+                      onClick={() => {
+                        if (filters.startDate && filters.endDate) {
+                          fetchOPDAppointments("custom", filters.startDate, filters.endDate)
+                        }
+                      }}
+                      variant="default"
+                      size="sm"
+                    >
+                      Apply
+                    </Button>
+                  </div>
+                )}
+                
                 <Button onClick={handleRefresh} disabled={refreshing} variant="outline">
                   <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
                   Refresh
@@ -549,10 +766,58 @@ const AdminDashboardPage: React.FC = () => {
             </CardContent>
           </Card>
 
+          {/* Consultation Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card className="bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-blue-800 flex items-center gap-2">
+                  <UserCheck className="h-4 w-4" />
+                  Total Doctors
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-700">{doctorConsultations.length}</div>
+                <p className="text-xs text-blue-600 mt-1">Active doctors with consultations</p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-purple-800 flex items-center gap-2">
+                  <UserCheck className="h-4 w-4" />
+                  Total Specialists
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-purple-700">{specialistConsultations.length}</div>
+                <p className="text-xs text-purple-600 mt-1">Medical specialties covered</p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-r from-green-50 to-green-100 border-green-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-green-800 flex items-center gap-2">
+                  <UserCheck className="h-4 w-4" />
+                  Total Consultations
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-700">{dashboardStats.totalConsultations}</div>
+                <p className="text-xs text-green-600 mt-1">Consultation appointments</p>
+              </CardContent>
+            </Card>
+          </div>
+
           {/* Appointments Chart */}
           <Card className="mb-8">
             <CardHeader>
-              <CardTitle>{dateFilter === "today" ? "Today's Appointments" : "Appointments (Last 7 Days)"}</CardTitle>
+              <CardTitle>
+                {filters.filterType === "today" 
+                  ? "Today's Appointments" 
+                  : filters.filterType === "custom" 
+                  ? `Appointments (${format(parseISO(filters.startDate), "MMM dd")} to ${format(parseISO(filters.endDate), "MMM dd, yyyy")})`
+                  : "Appointments (Last 7 Days)"}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="h-80">
@@ -561,7 +826,6 @@ const AdminDashboardPage: React.FC = () => {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="date" />
                     <YAxis />
-                    <Tooltip />
                     <Line
                       type="monotone"
                       dataKey="appointments"
@@ -574,6 +838,186 @@ const AdminDashboardPage: React.FC = () => {
               </div>
             </CardContent>
           </Card>
+
+          {/* Doctor Consultations List & Chart */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {/* List */}
+            <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                <UserCheck className="mr-2 h-5 w-5" /> Doctor Consultations
+              </h2>
+              {doctorConsultations.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Doctor Name
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Consultations
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {doctorConsultations.map((doc) => (
+                        <tr key={doc.doctorName} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {doc.doctorName}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600">{doc.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center text-gray-500 py-8">
+                  <p>No consultation data for the selected period.</p>
+                </div>
+              )}
+            </Card>
+            {/* Chart */}
+            <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                <UserCheck className="mr-2 h-5 w-5" /> Top Doctors by Consultations
+              </h2>
+              {doctorConsultChartData.labels.length > 0 ? (
+                <Bar
+                  data={doctorConsultChartData}
+                  options={{
+                    responsive: true,
+                    plugins: { legend: { position: "top" } },
+                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+                  }}
+                />
+              ) : (
+                <div className="text-center text-gray-500 py-8">
+                  <p>No data to display chart for the selected period.</p>
+                </div>
+              )}
+            </Card>
+          </div>
+
+          {/* Specialist Consultations List & Chart */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {/* List */}
+            <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                <UserCheck className="mr-2 h-5 w-5" /> Specialist Consultations
+              </h2>
+              {specialistConsultations.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Specialist
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Consultations
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {specialistConsultations.map((spec) => (
+                        <tr key={spec.specialistName} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {spec.specialistName}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600">{spec.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center text-gray-500 py-8">
+                  <p>No specialist consultation data for the selected period.</p>
+                </div>
+              )}
+            </Card>
+            {/* Chart */}
+            <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                <UserCheck className="mr-2 h-5 w-5" /> Top Specialists by Consultations
+              </h2>
+              {specialistConsultChartData.labels.length > 0 ? (
+                <Bar
+                  data={specialistConsultChartData}
+                  options={{
+                    responsive: true,
+                    plugins: { legend: { position: "top" } },
+                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+                  }}
+                />
+              ) : (
+                <div className="text-center text-gray-500 py-8">
+                  <p>No data to display chart for the selected period.</p>
+                </div>
+              )}
+            </Card>
+          </div>
+
+          {/* Service Type Consultations List & Chart */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {/* List */}
+            <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                <UserCheck className="mr-2 h-5 w-5" /> Service Type Consultations
+              </h2>
+              {serviceTypeConsultations.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Service Type
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Consultations
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {serviceTypeConsultations.map((service) => (
+                        <tr key={service.visitType} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900 capitalize">
+                            {service.visitType}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600">{service.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center text-gray-500 py-8">
+                  <p>No service type data for the selected period.</p>
+                </div>
+              )}
+            </Card>
+            {/* Chart */}
+            <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                <UserCheck className="mr-2 h-5 w-5" /> Consultations by Service Type
+              </h2>
+              {serviceTypeChartData.labels.length > 0 ? (
+                <Bar
+                  data={serviceTypeChartData}
+                  options={{
+                    responsive: true,
+                    plugins: { legend: { position: "top" } },
+                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+                  }}
+                />
+              ) : (
+                <div className="text-center text-gray-500 py-8">
+                  <p>No data to display chart for the selected period.</p>
+                </div>
+              )}
+            </Card>
+          </div>
 
           {/* Enhanced Appointments Table */}
           <Card>

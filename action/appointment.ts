@@ -212,9 +212,17 @@ export async function createAppointment(
         return { success: false, message: "Please select at least one service." }
       }
 
+      // Map doctor IDs to doctor names before saving service_info
+      const { data: doctorsForCreate } = await supabase.from("doctor").select("id, dr_name")
+      const doctorIdToNameForCreate = new Map<string, string>(
+        (doctorsForCreate || []).map((d: any) => [String(d.id), String(d.dr_name)])
+      )
+
       const serviceInfo = selectedModalities.map((modality) => ({
         type: modality.type,
-        doctor: modality.doctor || null, // Doctor is now mandatory, but setting null if missing to avoid DB error for now
+        doctor: modality.doctor
+          ? doctorIdToNameForCreate.get(String(modality.doctor)) || modality.doctor
+          : null,
         specialist: modality.specialist || null,
         visitType: modality.visitType || null,
         service: modality.service || null,
@@ -369,9 +377,17 @@ export async function updateAppointment(
     }
 
     // 3. Update OPD Registration
+    // Map doctor IDs to doctor names before saving service_info
+    const { data: doctorsForUpdate } = await supabase.from("doctor").select("id, dr_name")
+    const doctorIdToNameForUpdate = new Map<string, string>(
+      (doctorsForUpdate || []).map((d: any) => [String(d.id), String(d.dr_name)])
+    )
+
     const serviceInfo = selectedModalities.map((modality) => ({
       type: modality.type,
-      doctor: modality.doctor || null,
+      doctor: modality.doctor
+        ? doctorIdToNameForUpdate.get(String(modality.doctor)) || modality.doctor
+        : null,
       specialist: modality.specialist || null,
       visitType: modality.visitType || null,
       service: modality.service || null,

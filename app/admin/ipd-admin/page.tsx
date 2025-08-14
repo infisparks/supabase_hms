@@ -19,6 +19,7 @@ import {
 import {
   Bed,
   Users,
+  User,
   Search,
   ArrowRight,
   RefreshCw,
@@ -142,6 +143,9 @@ interface IPDRegistrationSupabaseJoined { // Renamed from your original `IPDRegi
   relative_name: string | null;
   relative_ph_no: number | null;
   relative_address: string | null;
+  discharge_summaries?: {
+    discharge_type: string | null;
+  }[] | null;
 }
 
 // OT Details (from Supabase `ot_details` table)
@@ -306,6 +310,7 @@ export default function IPDAdminPage() {
   // State for date filtering the patient list
   const [filterStartDate, setFilterStartDate] = useState<string | null>(null)
   const [filterEndDate, setFilterEndDate] = useState<string | null>(null)
+  const [dischargeStatusFilter, setDischargeStatusFilter] = useState<string | null>(null)
 
   // Fetches summary data for IPD admissions (today, this week, this month) and trend data for the last 30 days
   const fetchIPDSummary = useCallback(async () => {
@@ -395,8 +400,9 @@ export default function IPDAdminPage() {
           patient_detail (patient_id, name, number, age, gender, address, age_unit, dob, uhid),
           bed_management (id, room_type, bed_number, bed_type, status),
           service_detail,
-          payment_detail
-        `, // Added service_detail and payment_detail for table calculations if needed, or for pre-fetching for modal
+          payment_detail,
+          discharge_summaries (discharge_type)
+        `, // Added service_detail, payment_detail, and discharge_summaries for table calculations if needed, or for pre-fetching for modal
       )
 
       // Get the UTC boundaries for the selected filter period
@@ -437,20 +443,47 @@ export default function IPDAdminPage() {
     fetchPatients()
   }, [fetchIPDSummary, fetchPatients])
 
-  // Filters patients based on the search term (applied after date filtering)
+  // Debug logging for discharge_summaries data structure
+  useEffect(() => {
+    if (patients.length > 0) {
+      console.log('Sample patient discharge_summaries:', patients[0]?.discharge_summaries);
+      console.log('Patients with discharge_summaries:', patients.filter(p => p.discharge_summaries && p.discharge_summaries.length > 0).length);
+    }
+  }, [patients])
+
+  // Filters patients based on search term and discharge status (applied after date filtering)
   const filteredPatients = useMemo(() => {
+    let filtered = patients
+
+    // Apply discharge status filter
+    if (dischargeStatusFilter) {
+      filtered = filtered.filter((patient) => {
+        if (dischargeStatusFilter === "admitted") {
+          return !patient.discharge_date
+        } else if (dischargeStatusFilter === "discharged") {
+          return patient.discharge_date && getDischargeType(patient.discharge_summaries) === "Discharge"
+        } else if (dischargeStatusFilter === "partially") {
+          return patient.discharge_date && getDischargeType(patient.discharge_summaries) === "Discharge Partially"
+        } else if (dischargeStatusFilter === "death") {
+          return patient.discharge_date && getDischargeType(patient.discharge_summaries) === "Death"
+        }
+        return true
+      })
+    }
+
+    // Apply search term filter
     if (!searchTerm) {
-      return patients
+      return filtered
     }
     const lowerCaseSearchTerm = searchTerm.toLowerCase()
-    return patients.filter(
+    return filtered.filter(
       (patient) =>
         patient.patient_detail?.name?.toLowerCase().includes(lowerCaseSearchTerm) ||
         patient.uhid?.toLowerCase().includes(lowerCaseSearchTerm) ||
         patient.patient_detail?.number?.toString().includes(lowerCaseSearchTerm) ||
         patient.ipd_id.toString().includes(lowerCaseSearchTerm),
     )
-  }, [patients, searchTerm])
+  }, [patients, searchTerm, dischargeStatusFilter])
 
   // Handlers for date filter buttons
   const handleFilterToday = () => {
@@ -474,6 +507,7 @@ export default function IPDAdminPage() {
   const handleClearDateFilters = () => {
     setFilterStartDate(null)
     setFilterEndDate(null)
+    setDischargeStatusFilter(null)
   }
 
   // Handles opening the patient history modal and fetching detailed data
@@ -658,6 +692,63 @@ export default function IPDAdminPage() {
     )
   }
 
+  // Helper function to get discharge type from discharge_summaries array
+  const getDischargeType = (dischargeSummaries: any) => {
+    if (Array.isArray(dischargeSummaries) && dischargeSummaries.length > 0) {
+      return dischargeSummaries[0]?.discharge_type || null;
+    }
+    return null;
+  };
+
+  // Helper function to get discharge status and styling
+  const getDischargeStatus = (dischargeDate: string | null | undefined, bedStatus: string | null | undefined, dischargeType: string | null | undefined) => {
+    if (!dischargeDate) {
+      return {
+        status: "Admitted",
+        color: "bg-green-100 text-green-800",
+        icon: "🟢"
+      }
+    }
+    
+    // Use the actual discharge_type from discharge_summaries if available
+    if (dischargeType) {
+      if (dischargeType === "Discharge") {
+        return {
+          status: "Discharged",
+          color: "bg-blue-100 text-blue-800",
+          icon: "🔵"
+        }
+      } else if (dischargeType === "Discharge Partially") {
+        return {
+          status: "Partially Discharged",
+          color: "bg-yellow-100 text-yellow-800",
+          icon: "🟡"
+        }
+      } else if (dischargeType === "Death") {
+        return {
+          status: "Death",
+          color: "bg-red-100 text-red-800",
+          icon: "⚫"
+        }
+      }
+    }
+    
+    // Fallback to bed status logic if discharge_type is not available
+    if (bedStatus === "available") {
+      return {
+        status: "Discharged",
+        color: "bg-blue-100 text-blue-800",
+        icon: "🔵"
+      }
+    }
+    
+    return {
+      status: "Partially Discharged",
+      color: "bg-yellow-100 text-yellow-800",
+      icon: "🟡"
+    }
+  }
+
   return (
     <Layout>
       <div className="space-y-8">
@@ -665,7 +756,10 @@ export default function IPDAdminPage() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">IPD Admin Dashboard</h1>
-            <p className="text-gray-600">Overview of In-Patient Department activities</p>
+            <p className="text-gray-600">
+              Overview of In-Patient Department activities •{" "}
+              <span className="font-semibold text-teal-600">{patients.length} total patients</span>
+            </p>
           </div>
           <button
             onClick={() => {
@@ -680,7 +774,7 @@ export default function IPDAdminPage() {
         </div>
 
         {/* Summary Cards: Today, This Week, This Month */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <Card className="bg-gradient-to-br from-teal-500 to-cyan-600 text-white">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-white/80">Today's Admissions</CardTitle>
@@ -709,6 +803,16 @@ export default function IPDAdminPage() {
             <CardContent>
               <div className="text-3xl font-bold">{ipdSummary.thisMonth}</div>
               <p className="text-xs text-white/70">Total IPD patients this month</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-gradient-to-br from-emerald-500 to-green-600 text-white">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-white/80">Current Status</CardTitle>
+              <Users className="h-4 w-4 text-white/80" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold">{patients.filter(p => !p.discharge_date).length}</div>
+              <p className="text-xs text-white/70">Currently Admitted</p>
             </CardContent>
           </Card>
         </div>
@@ -765,6 +869,48 @@ export default function IPDAdminPage() {
           </CardContent>
         </Card>
 
+        {/* Discharge Status Summary */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <FileText className="h-5 w-5 text-teal-600" />
+              <span>Discharge Status Overview</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
+                <div className="text-2xl font-bold text-green-600">
+                  {patients.filter(p => !p.discharge_date).length}
+                </div>
+                <div className="text-sm text-green-700 font-medium">Currently Admitted</div>
+                <div className="text-xs text-green-600 mt-1">🟢 Active Patients</div>
+              </div>
+              <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="text-2xl font-bold text-blue-600">
+                  {patients.filter(p => p.discharge_date && getDischargeType(p.discharge_summaries) === "Discharge").length}
+                </div>
+                <div className="text-sm text-blue-700 font-medium">Fully Discharged</div>
+                <div className="text-xs text-blue-600 mt-1">🔵 Complete Discharge</div>
+              </div>
+              <div className="text-center p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                <div className="text-2xl font-bold text-yellow-600">
+                  {patients.filter(p => p.discharge_date && getDischargeType(p.discharge_summaries) === "Discharge Partially").length}
+                </div>
+                <div className="text-sm text-yellow-700 font-medium">Partially Discharged</div>
+                <div className="text-xs text-yellow-600 mt-1">🟡 Billing Pending</div>
+              </div>
+              <div className="text-center p-4 bg-red-50 rounded-lg border border-red-200">
+                <div className="text-2xl font-bold text-red-600">
+                  {patients.filter(p => p.discharge_date && getDischargeType(p.discharge_summaries) === "Death").length}
+                </div>
+                <div className="text-sm text-red-700 font-medium">Death Cases</div>
+                <div className="text-xs text-red-600 mt-1">⚫ Deceased Patients</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Patient List */}
         <Card>
           <CardHeader>
@@ -815,6 +961,23 @@ export default function IPDAdminPage() {
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                 />
               </div>
+              <div>
+                <label htmlFor="dischargeStatus" className="block text-sm font-medium text-gray-700 mb-1">
+                  Discharge Status
+                </label>
+                <select
+                  id="dischargeStatus"
+                  value={dischargeStatusFilter || ""}
+                  onChange={(e) => setDischargeStatusFilter(e.target.value || null)}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                >
+                  <option value="">All Statuses</option>
+                  <option value="admitted">Currently Admitted</option>
+                  <option value="discharged">Fully Discharged</option>
+                  <option value="partially">Partially Discharged</option>
+                  <option value="death">Death Cases</option>
+                </select>
+              </div>
               <div className="lg:col-span-4 flex flex-wrap gap-3">
                 <button
                   onClick={handleFilterToday}
@@ -834,16 +997,50 @@ export default function IPDAdminPage() {
                 >
                   This Month
                 </button>
-                {(filterStartDate || filterEndDate) && (
+                <button
+                  onClick={() => setDischargeStatusFilter("admitted")}
+                  className="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm"
+                >
+                  Show Admitted Only
+                </button>
+                <button
+                  onClick={() => setDischargeStatusFilter("death")}
+                  className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm"
+                >
+                  Show Death Cases
+                </button>
+                {(filterStartDate || filterEndDate || dischargeStatusFilter) && (
                   <button
                     onClick={handleClearDateFilters}
                     className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm flex items-center"
                   >
-                    <X size={14} className="mr-1" /> Clear Filters
+                    <X size={14} className="mr-1" /> Clear All Filters
                   </button>
                 )}
               </div>
             </div>
+            
+            {/* Results Summary */}
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                Showing <span className="font-semibold text-gray-900">{filteredPatients.length}</span> of{" "}
+                <span className="font-semibold text-gray-900">{patients.length}</span> total patients
+                {dischargeStatusFilter && (
+                  <span className="ml-2 text-gray-500">
+                    (Filtered by: {dischargeStatusFilter === "admitted" ? "Currently Admitted" : 
+                                   dischargeStatusFilter === "discharged" ? "Fully Discharged" : 
+                                   dischargeStatusFilter === "partially" ? "Partially Discharged" :
+                                   dischargeStatusFilter === "death" ? "Death Cases" : "Unknown"})
+                  </span>
+                )}
+              </div>
+              {filteredPatients.length > 0 && (
+                <div className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                  Last updated: {new Date().toLocaleTimeString()}
+                </div>
+              )}
+            </div>
+            
             {loading ? (
               <div className="text-center py-12 text-gray-500">
                 <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-teal-600" />
@@ -857,61 +1054,143 @@ export default function IPDAdminPage() {
             ) : (
               <div className="overflow-x-auto rounded-lg border border-gray-200">
                 <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        IPD ID
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200">
+                        <div className="flex items-center">
+                          <span>IPD ID</span>
+                        </div>
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Patient Name
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200">
+                        <div className="flex items-center">
+                          <Users className="h-4 w-4 mr-2 text-gray-500" />
+                          <span>Patient Information</span>
+                        </div>
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        UHID
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200">
+                        <div className="flex items-center">
+                          <CalendarDays className="h-4 w-4 mr-2 text-gray-500" />
+                          <span>Admission Date</span>
+                        </div>
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Admission Date
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200">
+                        <div className="flex items-center">
+                          <Bed className="h-4 w-4 mr-2 text-gray-500" />
+                          <span>Room/Bed</span>
+                        </div>
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Room/Bed
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200">
+                        <div className="flex items-center">
+                          <User className="h-4 w-4 mr-2 text-gray-500" />
+                          <span>Doctor</span>
+                        </div>
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Doctor
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200">
+                        <div className="flex items-center">
+                          <FileText className="h-4 w-4 mr-2 text-gray-500" />
+                          <span>Discharge Status</span>
+                        </div>
                       </th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
+                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200">
+                        <div className="flex items-center justify-center">
+                          <span>Actions</span>
+                        </div>
                       </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredPatients.map((patient) => (
-                      <tr key={patient.ipd_id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {patient.ipd_id}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {patient.patient_detail?.name || "N/A"}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{patient.uhid || "N/A"}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {patient.admission_date ? format(parseISO(patient.admission_date), "dd MMM, yyyy") : "N/A"}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {patient.bed_management?.room_type || "N/A"} (Bed:{" "}
-                          {patient.bed_management?.bed_number || "N/A"})
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {patient.under_care_of_doctor || "N/A"}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
-                          <button
-                            onClick={() => handleViewPatientHistory(patient.ipd_id)}
-                            className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors"
-                          >
-                            View History <ArrowRight size={14} className="ml-1" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredPatients.map((patient) => {
+                      const dischargeType = getDischargeType(patient.discharge_summaries);
+        const dischargeStatus = getDischargeStatus(patient.discharge_date, patient.bed_management?.status, dischargeType)
+                      return (
+                        <tr key={patient.ipd_id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {patient.ipd_id}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="space-y-2">
+                              <div className="font-semibold text-gray-900 text-sm">
+                                {patient.patient_detail?.name || "N/A"}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div className="flex items-center">
+                                  <span className="font-medium text-gray-600 w-16">ID:</span>
+                                  <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-xs text-gray-700">
+                                    {patient.patient_detail?.patient_id || "N/A"}
+                                  </span>
+                                </div>
+                                <div className="flex items-center">
+                                  <span className="font-medium text-gray-600 w-16">UHID:</span>
+                                  <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-xs text-gray-700">
+                                    {patient.uhid || "N/A"}
+                                  </span>
+                                </div>
+                                {patient.patient_detail?.age && (
+                                  <div className="flex items-center">
+                                    <span className="font-medium text-gray-600 w-16">Age:</span>
+                                    <span className="text-gray-700">
+                                      {patient.patient_detail.age} {patient.patient_detail.age_unit || 'y'}
+                                    </span>
+                                  </div>
+                                )}
+                                {patient.patient_detail?.gender && (
+                                  <div className="flex items-center">
+                                    <span className="font-medium text-gray-600 w-16">Gender:</span>
+                                    <span className="text-gray-700 capitalize">
+                                      {patient.patient_detail.gender}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {patient.admission_date ? format(parseISO(patient.admission_date), "dd MMM, yyyy") : "N/A"}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <div className="space-y-1">
+                              <div className="font-medium text-gray-700">
+                                {patient.bed_management?.room_type ? 
+                                  patient.bed_management.room_type.charAt(0).toUpperCase() + 
+                                  patient.bed_management.room_type.slice(1).toLowerCase() : "N/A"}
+                              </div>
+                              <div className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded inline-block">
+                                Bed {patient.bed_management?.bed_number || "N/A"}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {patient.under_care_of_doctor || "N/A"}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-2">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${dischargeStatus.color}`}>
+                                <span className="mr-1">{dischargeStatus.icon}</span>
+                                {dischargeStatus.status}
+                              </span>
+                              {patient.discharge_date && (
+                                <div className="text-xs text-gray-600 font-medium">
+                                  Discharged: {format(parseISO(patient.discharge_date), "dd MMM, yyyy")}
+                                </div>
+                              )}
+                              {!patient.discharge_date && (
+                                <div className="text-xs text-green-600 font-medium">
+                                  Active since: {patient.admission_date ? format(parseISO(patient.admission_date), "dd MMM, yyyy") : "N/A"}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
+                            <button
+                              onClick={() => handleViewPatientHistory(patient.ipd_id)}
+                              className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors"
+                            >
+                              View History <ArrowRight size={14} className="ml-1" />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

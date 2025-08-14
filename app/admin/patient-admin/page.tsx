@@ -19,6 +19,7 @@ import {
   Trash2,
   Filter,
   Search,
+  Eye,
   BarChart2,
   Plus,
 } from "lucide-react"
@@ -93,6 +94,20 @@ const PatientAdminPage = () => {
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState<Partial<PatientDetail>>({})
   const [loading, setLoading] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
+
+  // View combined data state
+  const [viewOpen, setViewOpen] = useState(false)
+  const [viewPatient, setViewPatient] = useState<PatientDetail | null>(null)
+  const [viewLoading, setViewLoading] = useState(false)
+  const [combinedRecords, setCombinedRecords] = useState<
+    { type: "OPD" | "IPD" | "OT"; created_at: string; title: string; subtitle?: string; raw: any }[]
+  >([])
+  const [selectedRecord, setSelectedRecord] = useState<
+    { type: "OPD" | "IPD" | "OT"; created_at: string; title: string; subtitle?: string; raw: any } | null
+  >(null)
+  const [selectedLoading, setSelectedLoading] = useState(false)
+  const [selectedExtra, setSelectedExtra] = useState<{ room_type?: string } | null>(null)
 
   // Fetch all patients
   useEffect(() => {
@@ -110,18 +125,10 @@ const PatientAdminPage = () => {
     fetchPatients()
   }, [])
 
-  // Filter/search logic
+  // Local date filtering when not actively searching
   useEffect(() => {
+    if (search.trim()) return
     let data = [...patients]
-    if (search.trim()) {
-      const q = search.trim().toLowerCase()
-      data = data.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.uhid.toLowerCase().includes(q) ||
-          (p.number && String(p.number).includes(q))
-      )
-    }
     if (filter === "today") {
       data = data.filter((p) => p.created_at && isToday(p.created_at.slice(0, 10)))
     } else if (filter === "week") {
@@ -130,7 +137,44 @@ const PatientAdminPage = () => {
       data = data.filter((p) => p.created_at && isThisMonth(p.created_at.slice(0, 10)))
     }
     setFiltered(data)
-  }, [patients, search, filter])
+  }, [patients, filter, search])
+
+  // Server-side search across whole dataset
+  useEffect(() => {
+    const q = search.trim()
+    if (!q) return
+    let active = true
+    setSearchLoading(true)
+    const sanitized = q.replace(/[%,()]/g, '')
+    const pattern = `%${sanitized}%`
+    const run = async () => {
+      const conditions = [
+        `name.ilike.${pattern}`,
+        `uhid.ilike.${pattern}`,
+      ]
+      if (/^\d+$/.test(sanitized)) {
+        conditions.push(`number.eq.${sanitized}`)
+      }
+      const { data, error } = await supabase
+        .from("patient_detail")
+        .select("*")
+        .or(conditions.join(","))
+        .order("created_at", { ascending: false })
+      if (!active) return
+      if (error) {
+        toast.error("Search failed")
+        setFiltered([])
+      } else {
+        setFiltered(data || [])
+      }
+      setSearchLoading(false)
+    }
+    const t = setTimeout(run, 300)
+    return () => {
+      active = false
+      clearTimeout(t)
+    }
+  }, [search])
 
   // Stats
   const stats = useMemo(() => {
@@ -238,6 +282,93 @@ const PatientAdminPage = () => {
     setLoading(false)
   }
 
+  const formatISTDateTime = (isoString: string) => {
+    try {
+      const d = new Date(isoString)
+      return new Intl.DateTimeFormat("en-IN", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(d)
+    } catch {
+      return isoString
+    }
+  }
+
+  const openView = async (p: PatientDetail) => {
+    setViewPatient(p)
+    setViewOpen(true)
+    setViewLoading(true)
+    try {
+      const [opdRes, ipdRes, otRes] = await Promise.all([
+        supabase
+          .from("opd_registration")
+          .select("opd_id, created_at, date, payment_info, service_info, bill_no, uhid, refer_by, \"additional Notes\"")
+          .eq("uhid", p.uhid)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("ipd_registration")
+          .select("ipd_id, uhid, admission_date, admission_time, under_care_of_doctor, payment_detail, service_detail, created_at, bed_id, ipd_notes")
+          .eq("uhid", p.uhid)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("ot_details")
+          .select("id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at")
+          .eq("uhid", p.uhid)
+          .order("created_at", { ascending: false }),
+      ])
+
+      const combined: { type: "OPD" | "IPD" | "OT"; created_at: string; title: string; subtitle?: string; raw: any }[] = []
+
+      if (opdRes.data) {
+        opdRes.data.forEach((r: any) => {
+          const services = Array.isArray(r?.service_info)
+            ? r.service_info.map((s: any) => s?.service || s?.type).filter(Boolean).join(", ")
+            : ""
+          combined.push({
+            type: "OPD",
+            created_at: r.created_at,
+            title: `OPD Bill #${r.bill_no ?? "-"}`,
+            subtitle: services || r?.refer_by || r?.["additional Notes"],
+            raw: r,
+          })
+        })
+      }
+      if (ipdRes.data) {
+        ipdRes.data.forEach((r: any) => {
+          combined.push({
+            type: "IPD",
+            created_at: r.created_at,
+            title: `IPD Admission #${r.ipd_id}`,
+            subtitle: `${r.admission_date || ""} ${r.admission_time || ""} ${r.under_care_of_doctor || ""}`.trim(),
+            raw: r,
+          })
+        })
+      }
+      if (otRes.data) {
+        otRes.data.forEach((r: any) => {
+          combined.push({
+            type: "OT",
+            created_at: r.created_at || r.ot_date,
+            title: `OT ${r.ot_type}`,
+            subtitle: r.ot_notes || "",
+            raw: r,
+          })
+        })
+      }
+
+      combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      setCombinedRecords(combined)
+    } catch (e) {
+      toast.error("Failed to load records")
+      setCombinedRecords([])
+    }
+    setViewLoading(false)
+  }
+
   return (
     <Layout>
       <div className="max-w-7xl mx-auto p-6 space-y-8">
@@ -333,7 +464,7 @@ const PatientAdminPage = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
             <Input
               type="text"
-              placeholder="Search by name, phone, or UHID"
+              placeholder="Search all records by name, phone, or UHID"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition shadow-sm"
@@ -348,7 +479,6 @@ const PatientAdminPage = () => {
                 <th className="px-6 py-3 text-left text-xs font-bold text-blue-700 uppercase tracking-wider">Patient Name</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-blue-700 uppercase tracking-wider">Phone</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-blue-700 uppercase tracking-wider">Age</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-blue-700 uppercase tracking-wider">Address</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-blue-700 uppercase tracking-wider">Gender</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-blue-700 uppercase tracking-wider">Action</th>
               </tr>
@@ -356,11 +486,11 @@ const PatientAdminPage = () => {
             <tbody className="bg-white divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12 text-gray-400">Loading...</td>
+                  <td colSpan={5} className="text-center py-12 text-gray-400">Loading...</td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12 text-gray-400">No patients found</td>
+                  <td colSpan={5} className="text-center py-12 text-gray-400">No patients found</td>
                 </tr>
               ) : (
                 filtered.map((p) => (
@@ -375,9 +505,11 @@ const PatientAdminPage = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-gray-700">
                       {p.age ?? "-"} {p.age_unit ? <span className="text-xs text-gray-500">{p.age_unit}</span> : null}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">{p.address ?? "-"}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-gray-700 capitalize">{p.gender ?? "-"}</td>
                     <td className="px-6 py-4 whitespace-nowrap flex gap-2">
+                      <Button size="sm" variant="outline" className="border-emerald-500 text-emerald-700 hover:bg-emerald-100" onClick={() => openView(p)}>
+                        <Eye className="h-4 w-4 mr-1" /> View Data
+                      </Button>
                       <Button size="sm" variant="outline" className="border-blue-500 text-blue-700 hover:bg-blue-100" onClick={() => openEdit(p)}>
                         <Edit className="h-4 w-4 mr-1" /> Edit
                       </Button>
@@ -418,10 +550,7 @@ const PatientAdminPage = () => {
                   <Input value={editForm.age_unit || ""} onChange={e => handleEditChange("age_unit", e.target.value)} />
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Address</label>
-                <Input value={editForm.address || ""} onChange={e => handleEditChange("address", e.target.value)} />
-              </div>
+              {/* Address field removed as requested */}
               <div>
                 <label className="block text-sm font-medium text-gray-700">Gender</label>
                 <Input value={editForm.gender || ""} onChange={e => handleEditChange("gender", e.target.value)} />
@@ -430,6 +559,97 @@ const PatientAdminPage = () => {
                 Update
               </Button>
             </div>
+          </DialogContent>
+        </Dialog>
+        {/* View Data Modal */}
+        <Dialog open={viewOpen} onOpenChange={(open) => { setViewOpen(open); if (!open) { setSelectedRecord(null); setSelectedExtra(null); } }}>
+          <DialogContent className="max-w-5xl p-6">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold mb-4 flex items-center gap-2">
+                <Eye className="h-6 w-6 text-emerald-600" /> {viewPatient ? `All Records for ${viewPatient.name} (UHID: ${viewPatient.uhid})` : "All Records"}
+              </DialogTitle>
+            </DialogHeader>
+            {viewLoading ? (
+              <div className="text-center text-gray-500 py-8">Loading records...</div>
+            ) : combinedRecords.length === 0 ? (
+              <div className="text-center text-gray-500 py-8">No OPD/IPD/OT records found</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[65vh]">
+                <div className="border rounded-md overflow-auto divide-y">
+                  {combinedRecords.map((rec, idx) => (
+                    <button
+                      key={idx}
+                      className={`w-full text-left py-3 px-3 flex items-start justify-between gap-4 hover:bg-gray-50 ${selectedRecord === rec ? "bg-emerald-50" : ""}`}
+                      onClick={async () => {
+                        setSelectedRecord(rec)
+                        setSelectedExtra(null)
+                        if (rec.type === "IPD" && rec.raw?.bed_id) {
+                          setSelectedLoading(true)
+                          const { data } = await supabase.from("bed_management").select("room_type").eq("id", rec.raw.bed_id).single()
+                          setSelectedExtra({ room_type: data?.room_type })
+                          setSelectedLoading(false)
+                        }
+                      }}
+                    >
+                      <div className="flex-1">
+                        <div className="text-sm font-semibold">
+                          <span className={`mr-2 rounded-full px-2 py-0.5 text-xs font-bold ${
+                            rec.type === "OPD" ? "bg-blue-100 text-blue-700" : rec.type === "IPD" ? "bg-amber-100 text-amber-700" : "bg-purple-100 text-purple-700"
+                          }`}>{rec.type}</span>
+                          {rec.title}
+                        </div>
+                        {rec.subtitle ? (
+                          <div className="text-xs text-gray-600 mt-1 line-clamp-2">{rec.subtitle}</div>
+                        ) : null}
+                      </div>
+                      <div className="text-xs text-gray-600 whitespace-nowrap">{formatISTDateTime(rec.created_at)}</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="border rounded-md p-4 overflow-auto">
+                  {!selectedRecord ? (
+                    <div className="text-gray-500 text-sm">Click an OPD/IPD/OT item to see details here.</div>
+                  ) : selectedLoading ? (
+                    <div className="text-gray-500 text-sm">Loading details...</div>
+                  ) : (
+                    <div className="space-y-2 text-sm">
+                      <div className="font-semibold">
+                        {selectedRecord.type} Details
+                      </div>
+                      {selectedRecord.type === "OPD" && (
+                        <div className="space-y-1">
+                          <div>Bill No: {selectedRecord.raw?.bill_no ?? "-"}</div>
+                          <div>Date: {selectedRecord.raw?.date ? formatISTDateTime(selectedRecord.raw.date) : formatISTDateTime(selectedRecord.created_at)}</div>
+                          <div>Refer By: {selectedRecord.raw?.refer_by || "-"}</div>
+                          <div>Services: {Array.isArray(selectedRecord.raw?.service_info) ? selectedRecord.raw.service_info.map((s: any) => s?.service || s?.type).filter(Boolean).join(", ") : "-"}</div>
+                          {selectedRecord.raw?.payment_info && (
+                            <div>Total Paid: {selectedRecord.raw.payment_info?.totalPaid ?? "-"}</div>
+                          )}
+                        </div>
+                      )}
+                      {selectedRecord.type === "IPD" && (
+                        <div className="space-y-1">
+                          <div>IPD ID: {selectedRecord.raw?.ipd_id}</div>
+                          <div>Admission: {selectedRecord.raw?.admission_date || "-"} {selectedRecord.raw?.admission_time || ""}</div>
+                          <div>Under Care: {selectedRecord.raw?.under_care_of_doctor || "-"}</div>
+                          <div>Room Type: {selectedExtra?.room_type || (selectedRecord.raw?.bed_id ? "-" : "NA")}</div>
+                          <div>Services: {Array.isArray(selectedRecord.raw?.service_detail) ? selectedRecord.raw.service_detail.map((s: any) => s?.serviceName || s?.type).filter(Boolean).join(", ") : "-"}</div>
+                          <div>Notes: {selectedRecord.raw?.ipd_notes || "-"}</div>
+                        </div>
+                      )}
+                      {selectedRecord.type === "OT" && (
+                        <div className="space-y-1">
+                          <div>Type: {selectedRecord.raw?.ot_type}</div>
+                          <div>OT Date: {selectedRecord.raw?.ot_date ? formatISTDateTime(selectedRecord.raw.ot_date) : formatISTDateTime(selectedRecord.created_at)}</div>
+                          <div>Notes: {selectedRecord.raw?.ot_notes || "-"}</div>
+                          <div>Linked IPD: {selectedRecord.raw?.ipd_id ?? "-"}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </div>

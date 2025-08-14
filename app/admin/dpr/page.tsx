@@ -17,6 +17,8 @@ import {
   Building2,
   Printer,
   Heart,
+  X,
+  Activity,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { format, parseISO } from 'date-fns'
@@ -45,8 +47,11 @@ interface KPIData {
   totalMinorOT: number;
   totalOTProcedures: number;
   totalDeaths: number;
-  totalCasualtyOPD: number; // NEW: Casualty OPD Count
-  totalConsultantOPD: number; // NEW: Consultant OPD Count
+  totalCasualtyOPD: number;
+  totalConsultantOPD: number;
+  totalXray: number;
+  totalDialysis: number;
+  totalPathology: number;
 }
 
 
@@ -66,7 +71,7 @@ interface Alert {
 
 const DPRPage = () => {
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [departmentFilter, setDepartmentFilter] = useState<string>('all');
+  const [departmentFilter, setDepartmentFilter] = useState<string>('all'); // This filter is not fully implemented in fetching logic, but kept for UI
   const [isLoading, setIsLoading] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
 
@@ -82,8 +87,11 @@ const DPRPage = () => {
     totalMinorOT: 0,
     totalOTProcedures: 0,
     totalDeaths: 0,
-    totalCasualtyOPD: 0, // Initialize
-    totalConsultantOPD: 0, // Initialize
+    totalCasualtyOPD: 0,
+    totalConsultantOPD: 0,
+    totalXray: 0,
+    totalDialysis: 0,
+    totalPathology: 0,
   });
 
   const [bedManagement, setBedManagement] = useState<BedManagement[]>([]);
@@ -102,22 +110,24 @@ const DPRPage = () => {
           service_info,
           payment_info,
           "additional Notes",
-          opd_id
+          opd_id,
+          date
         `)
-        .gte('created_at', start)
-        .lte('created_at', end);
+        .gte('date', start)
+        .lte('date', end);
       if (opdError) {
         console.error("Supabase OPD fetch error:", opdError);
         throw opdError;
       }
 
+      // Fetch IPD admissions that *began* on the selected date
       const { data: ipdAdmissions, error: ipdError } = await supabase
         .from('ipd_registration')
         .select(`
+          ipd_id,
           created_at,
           discharge_date,
-          under_care_of_doctor,
-          payment_detail,
+          bed_id,
           admission_type
         `)
         .gte('created_at', start)
@@ -127,16 +137,31 @@ const DPRPage = () => {
         throw ipdError;
       }
 
+      // Fetch all IPD registrations that were active on the selected date for accurate bed management
+      // This means admitted on or before selectedDate, and discharged on or after selectedDate, or not yet discharged
+      const { data: activeIpdRegistrations, error: activeIpdError } = await supabase
+        .from('ipd_registration')
+        .select(`
+          ipd_id,
+          admission_date,
+          admission_time,
+          discharge_date,
+          bed_id
+        `);
+      
+      if (activeIpdError) {
+        console.error("Supabase Active IPD fetch error:", activeIpdError);
+        throw activeIpdError;
+      }
+
+
       const { data: otProcedures, error: otError } = await supabase
         .from('ot_details')
         .select(`
           created_at,
           ot_date,
-          ipd_id,
-          uhid,
           ot_type,
-          ot_notes,
-          id
+          ot_notes
         `)
         .gte('created_at', start)
         .lte('created_at', end);
@@ -147,25 +172,22 @@ const DPRPage = () => {
 
       const { data: beds, error: bedError } = await supabase
         .from('bed_management')
-        .select('status, room_type');
+        .select('id, status, room_type'); // Ensure 'id' is selected for bed matching
       if (bedError) {
         console.error("Supabase Beds fetch error:", bedError);
         throw bedError;
       }
 
-      // Fetch discharge summaries for deaths
+      // Fetch discharge summaries for discharges on the selected date, including discharge_type
       const { data: dischargeSummaries, error: dischargeError } = await supabase
         .from('discharge_summaries')
         .select(`
           id,
           ipd_id,
-          patient_id,
-          uhid,
           discharge_type,
           last_updated
         `)
-        .eq('discharge_type', 'Death')
-        .gte('last_updated', start)
+        .gte('last_updated', start) // Assuming last_updated reflects discharge date
         .lte('last_updated', end);
       if (dischargeError) {
         console.error("Supabase Discharge Summaries fetch error:", dischargeError);
@@ -177,30 +199,38 @@ const DPRPage = () => {
 
       let totalCasualtyOPD = 0;
       let totalConsultantOPD = 0;
+      let totalXray = 0;
+      let totalDialysis = 0;
 
       opdAppointments?.forEach((appointment: any) => {
         if (appointment.service_info && Array.isArray(appointment.service_info)) {
-          const isCasualty = appointment.service_info.some((service: any) =>
-            service.type?.toLowerCase() === 'casualty'
-          );
-          if (isCasualty) {
-            totalCasualtyOPD++;
-          } else {
-            totalConsultantOPD++;
-          }
+          appointment.service_info.forEach((service: any) => {
+            const serviceType = service.type?.toLowerCase();
+            if (serviceType === 'casualty') {
+              totalCasualtyOPD++;
+              if (service.service?.toLowerCase().includes('dialysis')) {
+                totalDialysis++;
+              }
+            } else if (serviceType === 'consultation') {
+              totalConsultantOPD++;
+            } else if (serviceType === 'xray') {
+              totalXray++;
+            }
+          });
         }
       });
 
-
       const totalIPD = ipdAdmissions?.length || 0;
 
-      const totalDischarges = ipdAdmissions?.filter(ipd => {
-        if (ipd.discharge_date) {
-          const dischargeDateFormatted = format(parseISO(ipd.discharge_date), 'yyyy-MM-dd');
-          return dischargeDateFormatted === selectedDate;
-        }
-        return false;
-      }).length || 0;
+      // Count discharges and deaths based on discharge_summaries for the selected date
+      const dischargesOnSelectedDate = dischargeSummaries?.filter(summary => {
+        const dischargeDateFormatted = format(parseISO(summary.last_updated), 'yyyy-MM-dd');
+        return dischargeDateFormatted === selectedDate;
+      }) || [];
+
+      const totalDischarges = dischargesOnSelectedDate.length;
+      const totalDeaths = dischargesOnSelectedDate.filter(summary => summary.discharge_type === 'Death').length;
+
 
       // OT Calculations - Major vs Minor
       const majorOT = otProcedures?.filter(ot =>
@@ -215,8 +245,25 @@ const DPRPage = () => {
 
       const totalOT = majorOT + minorOT;
 
-      // Death calculations
-      const totalDeaths = dischargeSummaries?.length || 0;
+      // Fetch Pathology count from secure server API
+      let totalPathology = 0;
+      try {
+        const res = await fetch('/api/lab/pathology-count', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date: selectedDate })
+        })
+        if (res.ok) {
+          const json = await res.json()
+          if (json && typeof json.count === 'number') {
+            totalPathology = json.count
+          }
+        } else {
+          console.warn('Failed to fetch pathology count')
+        }
+      } catch (e) {
+        console.warn('Error while fetching pathology count', e)
+      }
 
       setKpiData({
         totalOPDAppointments: totalOPD,
@@ -228,20 +275,47 @@ const DPRPage = () => {
         totalDeaths: totalDeaths,
         totalCasualtyOPD: totalCasualtyOPD,
         totalConsultantOPD: totalConsultantOPD,
+        totalXray: totalXray,
+        totalDialysis: totalDialysis,
+        totalPathology,
       });
 
-      // --- Bed Management Tab Data ---
+      // --- Bed Management Tab Data Calculation for the selected date ---
+      const bedStatusForSelectedDate: { [bedId: number]: boolean } = {}; // true if occupied
+
+      activeIpdRegistrations?.forEach((ipd: any) => {
+        const admissionDateTime = parseISO(`${ipd.admission_date}T${ipd.admission_time || '00:00:00'}`);
+        const dischargeDateTime = ipd.discharge_date ? parseISO(ipd.discharge_date) : null;
+        const selectedDateStart = parseISO(start);
+        const selectedDateEnd = parseISO(end);
+
+        // Check if the IPD registration was active at any point on the selected date
+        const wasAdmittedOnOrBeforeSelectedDate = admissionDateTime <= selectedDateEnd;
+        const wasDischargedOnOrAfterSelectedDate = !dischargeDateTime || dischargeDateTime >= selectedDateStart;
+
+        if (wasAdmittedOnOrBeforeSelectedDate && wasDischargedOnOrAfterSelectedDate) {
+          if (ipd.bed_id) {
+            bedStatusForSelectedDate[ipd.bed_id] = true; // Mark bed as occupied for the selected date
+          }
+        }
+      });
+      
       const uniqueRoomTypes = Array.from(new Set(beds?.map(bed => bed.room_type).filter(Boolean))) as string[];
 
       const bedManagementData: BedManagement[] = uniqueRoomTypes
-        .filter(roomType => !roomType.toLowerCase().includes('test ward')) // Filter out Test Ward
+        .filter(roomType => !roomType.toLowerCase().includes('test ward'))
         .map(roomType => {
           const bedsInThisWard = beds?.filter(bed => bed.room_type === roomType) || [];
-
           const totalBedsInWard = bedsInThisWard.length;
-          const occupiedBedsInWard = bedsInThisWard.filter(bed => bed.status === 'occupied').length;
-          const availableBedsInWard = bedsInThisWard.filter(bed => bed.status === 'available').length;
+          
+          let occupiedBedsInWard = 0;
+          bedsInThisWard.forEach(bed => {
+            if (bedStatusForSelectedDate[bed.id]) {
+              occupiedBedsInWard++;
+            }
+          });
 
+          const availableBedsInWard = totalBedsInWard - occupiedBedsInWard;
           const occupancyRate = totalBedsInWard > 0 ? (occupiedBedsInWard / totalBedsInWard) * 100 : 0;
 
           return {
@@ -254,6 +328,7 @@ const DPRPage = () => {
         }).sort((a,b) => b.occupancyRate - a.occupancyRate);
 
       setBedManagement(bedManagementData);
+
 
       // --- Automated Alerts Generation ---
       if (totalOT === 0 && selectedDate === format(new Date(), 'yyyy-MM-dd')) {
@@ -288,7 +363,7 @@ const DPRPage = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedDate]);
+  }, [selectedDate]); // Re-run fetchDPRData when selectedDate changes
 
   useEffect(() => {
     fetchDPRData();
@@ -352,8 +427,8 @@ const DPRPage = () => {
 
             .kpi-grid {
               display: grid;
-              grid-template-columns: repeat(5, 1fr);
-              gap: 8px; /* Reduced gap */
+              grid-template-columns: repeat(8, 1fr);
+              gap: 6px; /* Further reduced gap for 7 columns */
               margin: 15px 0; /* Reduced margin */
             }
             .kpi-card {
@@ -361,9 +436,10 @@ const DPRPage = () => {
               padding: 8px; /* Reduced padding */
               text-align: center;
               border-radius: 6px; /* Slightly smaller border radius */
+              background: #f9fafb;
             }
             .kpi-value {
-              font-size: 26px; /* Smaller KPI value */
+              font-size: 24px; /* Slightly smaller for 7 columns */
               font-weight: bold;
               color: #2563eb;
               margin-bottom: 3px; /* Reduced margin */
@@ -458,7 +534,7 @@ const DPRPage = () => {
         <div className="kpi-grid">
           <div className="kpi-card">
             <div className="kpi-value">{kpiData.totalOPDAppointments}</div>
-            <div className="kpi-label">Total OPD</div>
+            <div className="kpi-label">Total OPD Appointments</div>
             {/* NEW: OPD Breakdown for PDF */}
             <div className="opd-breakdown-grid">
               <div className="opd-breakdown-item">
@@ -473,7 +549,7 @@ const DPRPage = () => {
           </div>
           <div className="kpi-card">
             <div className="kpi-value">{kpiData.totalIPDAdmissions}</div>
-            <div className="kpi-label">Total IPD</div>
+            <div className="kpi-label">Total IPD Admissions</div>
           </div>
           <div className="kpi-card">
             <div className="kpi-value">{kpiData.totalOTProcedures}</div>
@@ -486,6 +562,19 @@ const DPRPage = () => {
           <div className="kpi-card">
             <div className="kpi-value">{kpiData.totalDeaths}</div>
             <div className="kpi-label">Total Deaths</div>
+          </div>
+          {/* NEW: X-ray and Dialysis for PDF */}
+          <div className="kpi-card">
+            <div className="kpi-value">{kpiData.totalXray}</div>
+            <div className="kpi-label">Total X-ray</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-value">{kpiData.totalDialysis}</div>
+            <div className="kpi-label">Total Dialysis</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-value">{kpiData.totalPathology}</div>
+            <div className="kpi-label">Total Pathology</div>
           </div>
         </div>
 
@@ -503,6 +592,29 @@ const DPRPage = () => {
             <div className="ot-item">
               <div className="ot-value">{kpiData.totalOTProcedures}</div>
               <div className="ot-label">Total OT</div>
+            </div>
+          </div>
+        </div>
+
+        {/* NEW: Service Breakdown for PDF */}
+        <div className="ot-card">
+          <div className="section-title">Service Breakdown</div>
+          <div className="ot-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', marginTop: '8px' }}>
+            <div className="ot-item">
+              <div className="ot-value">{kpiData.totalXray}</div>
+              <div className="ot-label">X-ray</div>
+            </div>
+            <div className="ot-item">
+              <div className="ot-value">{kpiData.totalDialysis}</div>
+              <div className="ot-label">Dialysis</div>
+            </div>
+            <div className="ot-item">
+              <div className="ot-value">{kpiData.totalCasualtyOPD + kpiData.totalConsultantOPD}</div>
+              <div className="ot-label">Total OPD Appointments</div>
+            </div>
+            <div className="ot-item">
+              <div className="ot-value">{kpiData.totalPathology}</div>
+              <div className="ot-label">Pathology</div>
             </div>
           </div>
         </div>
@@ -643,11 +755,25 @@ const DPRPage = () => {
           </div>
         </div>
 
+        {/* Summary Banner */}
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg p-6 text-white shadow-lg">
+          <div className="flex flex-col md:flex-row items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold mb-2">Daily Service Summary</h2>
+              <p className="text-blue-100">Complete overview of all hospital services for {format(parseISO(selectedDate), 'EEEE, MMMM dd, yyyy')}</p>
+            </div>
+            <div className="mt-4 md:mt-0 text-center md:text-right">
+              <div className="text-3xl font-bold">{kpiData.totalOPDAppointments + kpiData.totalIPDAdmissions}</div>
+              <div className="text-blue-100 text-sm">Total Patients</div>
+            </div>
+          </div>
+        </div>
+
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
           <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-blue-100 bg-blue-50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-blue-800">Total OPD</CardTitle>
+              <CardTitle className="text-sm font-medium text-blue-800">Total OPD Appointments</CardTitle>
               <Calendar className="h-5 w-5 text-blue-600" />
             </CardHeader>
             <CardContent>
@@ -669,7 +795,7 @@ const DPRPage = () => {
 
           <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-purple-100 bg-purple-50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-purple-800">Total IPD</CardTitle>
+              <CardTitle className="text-sm font-medium text-purple-800">Total IPD Admissions</CardTitle>
               <Building2 className="h-5 w-5 text-purple-600" />
             </CardHeader>
             <CardContent>
@@ -720,7 +846,79 @@ const DPRPage = () => {
               <p className="text-xs text-red-600 mt-1">Deaths on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
+
+          {/* NEW: X-ray KPI Card */}
+          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-amber-100 bg-amber-50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-amber-800">Total X-ray</CardTitle>
+              <X className="h-5 w-5 text-amber-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-amber-900">{kpiData.totalXray}</div>
+              <p className="text-xs text-amber-600 mt-1">X-ray Services</p>
+            </CardContent>
+          </Card>
+
+          {/* NEW: Dialysis KPI Card */}
+          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-cyan-100 bg-cyan-50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-cyan-800">Total Dialysis</CardTitle>
+              <Activity className="h-5 w-5 text-cyan-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-cyan-900">{kpiData.totalDialysis}</div>
+              <p className="text-xs text-cyan-600 mt-1">Dialysis Services</p>
+            </CardContent>
+          </Card>
+
+          {/* NEW: Pathology KPI Card */}
+          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-rose-100 bg-rose-50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-rose-800">Total Pathology</CardTitle>
+              <TrendingUp className="h-5 w-5 text-rose-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-rose-900">{kpiData.totalPathology}</div>
+              <p className="text-xs text-rose-600 mt-1">Lab Tests</p>
+            </CardContent>
+          </Card>
         </div>
+
+        {/* Service Breakdown Summary */}
+        <Card className="shadow-lg border border-gray-100 mt-6">
+          <CardHeader className="border-b pb-4">
+            <CardTitle className="text-xl font-semibold text-gray-800">Service Breakdown Summary ({format(parseISO(selectedDate), 'dd-MM-yyyy')})</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200 hover:shadow-md transition-all duration-200 hover:scale-105">
+                <div className="text-2xl font-bold text-blue-700">{kpiData.totalCasualtyOPD}</div>
+                <div className="text-sm font-medium text-blue-600">Casualty Services</div>
+                <div className="text-xs text-blue-500 mt-1">Emergency & Walk-in</div>
+              </div>
+              <div className="text-center p-4 bg-indigo-50 rounded-lg border border-indigo-200 hover:shadow-md transition-all duration-200 hover:scale-105">
+                <div className="text-2xl font-bold text-indigo-700">{kpiData.totalConsultantOPD}</div>
+                <div className="text-sm font-medium text-indigo-600">Consultation Services</div>
+                <div className="text-xs text-indigo-500 mt-1">Scheduled Appointments</div>
+              </div>
+              <div className="text-center p-4 bg-amber-50 rounded-lg border border-amber-200 hover:shadow-md transition-all duration-200 hover:scale-105">
+                <div className="text-2xl font-bold text-amber-700">{kpiData.totalXray}</div>
+                <div className="text-sm font-medium text-amber-600">X-ray Services</div>
+                <div className="text-xs text-amber-500 mt-1">Diagnostic Imaging</div>
+              </div>
+              <div className="text-center p-4 bg-cyan-50 rounded-lg border border-cyan-200 hover:shadow-md transition-all duration-200 hover:scale-105">
+                <div className="text-2xl font-bold text-cyan-700">{kpiData.totalDialysis}</div>
+                <div className="text-sm font-medium text-cyan-600">Dialysis Services</div>
+                <div className="text-xs text-cyan-500 mt-1">Kidney Treatment</div>
+              </div>
+              <div className="text-center p-4 bg-rose-50 rounded-lg border border-rose-200 hover:shadow-md transition-all duration-200 hover:scale-105">
+                <div className="text-2xl font-bold text-rose-700">{kpiData.totalPathology}</div>
+                <div className="text-sm font-medium text-rose-600">Pathology Tests</div>
+                <div className="text-xs text-rose-500 mt-1">Daily Lab Count</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Bed Management Section */}
         <Card className="shadow-lg border border-gray-100">

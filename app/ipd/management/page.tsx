@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import {
   Search,
   Edit,
-  Users,
+  Users, // Still useful for the table rendering function for icon, even if not directly used in the main stats section.
   Home,
   XCircle,
   CheckCircle,
@@ -14,7 +14,7 @@ import {
   Clipboard,
   Stethoscope,
   RefreshCw,
-  IndianRupeeIcon,
+  IndianRupeeIcon, // Still useful for the table rendering function for formatting, even if not directly used in the main stats section.
   Trash2,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -295,9 +295,9 @@ export default function IPDManagementPage() {
     })
     return Array.from(wards)
   }, [allIpdRecords, formatRoomType])
-  // Summary stats
-  const totalPatients = processedRecords.length
-  const totalDeposits = processedRecords.reduce((sum, record) => sum + record.depositAmount, 0)
+  // Summary stats (no longer displayed directly in cards)
+  // const totalPatients = processedRecords.length
+  // const totalDeposits = processedRecords.reduce((sum, record) => sum + record.depositAmount, 0)
   // Format currency without leading zero issue
   const formatCurrency = useCallback((amount: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -408,8 +408,8 @@ export default function IPDManagementPage() {
             <h1 className="text-4xl font-bold text-slate-800 mb-2">IPD Billing Management</h1>
             <p className="text-slate-500">Manage and track in-patient billing records and admissions</p>
           </div>
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {/* Removed Stats Cards */}
+          {/* <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             <Card className="bg-white shadow-lg border border-blue-100">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-blue-600">Total Patients</CardTitle>
@@ -434,7 +434,7 @@ export default function IPDManagementPage() {
                 <p className="text-xs text-slate-500 mt-1">Net deposits after refunds</p>
               </CardContent>
             </Card>
-          </div>
+          </div> */}
           {/* Tabs & Filters */}
           <Card className="mb-8 shadow-lg border border-slate-200">
             <CardContent className="p-6">
@@ -457,14 +457,14 @@ export default function IPDManagementPage() {
                         className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:shadow-md transition-all duration-200 px-4 py-2 rounded-md"
                       >
                         <Clipboard className="h-4 w-4 mr-2" />
-                        Partially Discharged
+                        Partially Discharged ({partiallyDischargedRecords.length})
                       </TabsTrigger>
                       <TabsTrigger
                         value="discharge"
                         className="data-[state=active]:bg-green-600 data-[state=active]:text-white data-[state=active]:shadow-md transition-all duration-200 px-4 py-2 rounded-md"
                       >
                         <CheckCircle className="h-4 w-4 mr-2" />
-                        Discharged
+                        Discharged ({fullyDischargedRecords.length})
                       </TabsTrigger>
                     </TabsList>
                   </div>

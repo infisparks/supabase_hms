@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -34,7 +34,7 @@ import Layout from "@/components/global/Layout"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
-import { format, isToday, isThisWeek, parseISO } from "date-fns"
+import { format, isToday, isThisWeek, parseISO, startOfDay, endOfDay, startOfWeek, endOfWeek } from "date-fns"
 
 // Patient detail object
 interface PatientDetail {
@@ -52,8 +52,9 @@ interface PatientDetail {
 interface OPDAppointment {
   opd_id: number
   created_at: string
+  date: string // The actual appointment date (timestamp without time zone)
   refer_by: string | null
-  service_info: any[]
+  service_info: any[] | null
   payment_info: any
   uhid_from_registration: string
   patient_detail: PatientDetail | null
@@ -69,27 +70,24 @@ const OPDListPage = () => {
 
   useEffect(() => {
     fetchAppointments()
-    // eslint-disable-next-line
   }, [])
 
   useEffect(() => {
     filterAppointments()
-    // eslint-disable-next-line
   }, [appointments, searchTerm, activeTab])
 
-  // UPDATED fetch: join by uhid FK, return patient_detail as single object
   const fetchAppointments = async () => {
     setIsLoading(true)
     try {
       const { data, error } = await supabase
         .from("opd_registration")
         .select(`
-          opd_id, created_at, refer_by, service_info, payment_info, uhid,
+          opd_id, created_at, date, refer_by, "additional Notes", service_info, payment_info, uhid,
           patient_detail:patient_detail!opd_registration_uhid_fkey (
             patient_id, name, number, age, gender, address, age_unit, uhid
           )
         `)
-        .order("created_at", { ascending: false })
+        .order("date", { ascending: false })
 
       if (error) {
         toast.error("Failed to fetch appointments: " + error.message)
@@ -97,12 +95,13 @@ const OPDListPage = () => {
         return
       }
 
-      // patient_detail will be either null or an object now, not array
       const processedData: OPDAppointment[] = (data || []).map((appt: any) => ({
         opd_id: appt.opd_id,
         created_at: appt.created_at,
+        date: appt.date,
         refer_by: appt.refer_by ?? null,
-        service_info: appt.service_info,
+        'additional Notes': appt['additional Notes'] ?? null,
+        service_info: appt.service_info || [],
         payment_info: appt.payment_info,
         uhid_from_registration: appt.uhid,
         patient_detail: appt.patient_detail || null,
@@ -115,13 +114,37 @@ const OPDListPage = () => {
     }
   }
 
-  const filterAppointments = () => {
+  const filterAppointments = useCallback(() => {
     let filtered = appointments
 
+    const now = new Date(); // Current local time
+
     if (activeTab === "today") {
-      filtered = filtered.filter((appointment) => isToday(parseISO(appointment.created_at)))
+      const todayStart = startOfDay(now);
+      const todayEnd = endOfDay(now);
+
+      filtered = filtered.filter((appointment) => {
+        try {
+          const appointmentDate = parseISO(appointment.date); // Parse as local time
+          return appointmentDate >= todayStart && appointmentDate <= todayEnd;
+        } catch (e) {
+          console.error("Error parsing appointment date for filtering:", appointment.date, e);
+          return false;
+        }
+      });
     } else if (activeTab === "week") {
-      filtered = filtered.filter((appointment) => isThisWeek(parseISO(appointment.created_at), { weekStartsOn: 1 }))
+      const weekStart = startOfWeek(now, { weekStartsOn: 1 }); // Monday as start of week
+      const weekEnd = endOfWeek(now, { weekStartsOn: 1 });     // Sunday as end of week
+
+      filtered = filtered.filter((appointment) => {
+        try {
+          const appointmentDate = parseISO(appointment.date); // Parse as local time
+          return appointmentDate >= weekStart && appointmentDate <= weekEnd;
+        } catch (e) {
+          console.error("Error parsing appointment date for filtering:", appointment.date, e);
+          return false;
+        }
+      });
     }
 
     if (searchTerm) {
@@ -135,16 +158,21 @@ const OPDListPage = () => {
       )
     }
     setFilteredAppointments(filtered)
-  }
+  }, [appointments, searchTerm, activeTab])
 
   const handleDeleteAppointment = async (opdId: number) => {
     try {
       const { error } = await supabase.from("opd_registration").delete().eq("opd_id", opdId)
-      if (error) throw error
+      
+      if (error) {
+        toast.error("Failed to delete appointment: " + error.message)
+        throw error
+      }
       toast.success("Appointment deleted successfully!")
       fetchAppointments()
     } catch (error) {
-      toast.error("Failed to delete appointment")
+      console.error("Delete error:", error);
+      toast.error("Failed to delete appointment.")
     }
   }
 
@@ -152,7 +180,7 @@ const OPDListPage = () => {
     router.push(`/opd/appointment/${appointment.opd_id}`)
   }
 
-  const getAppointmentType = (serviceInfo: any[]) => {
+  const getAppointmentType = (serviceInfo: any[] | null) => {
     if (Array.isArray(serviceInfo) && serviceInfo.some((service) => service.type === "consultation")) {
       return "OPD"
     }
@@ -169,7 +197,8 @@ const OPDListPage = () => {
     try {
       if (!dateString) return "Invalid Date"
       return format(parseISO(dateString), "MMM dd, yyyy - hh:mm a")
-    } catch {
+    } catch (e) {
+      console.error("Error formatting date:", dateString, e);
       return "Invalid Date"
     }
   }
@@ -177,7 +206,6 @@ const OPDListPage = () => {
   return (
     <Layout>
       <div className="space-y-8 p-4 md:p-8 bg-gray-50 min-h-screen">
-        {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-4xl font-extrabold text-gray-900">OPD Management</h1>
@@ -202,7 +230,6 @@ const OPDListPage = () => {
             </Button>
           </div>
         </div>
-        {/* Filter Tabs and Search */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <div className="flex flex-col md:flex-row gap-4 items-center">
             <TabsList className="grid w-full grid-cols-3 bg-gray-200 rounded-lg p-1 md:w-auto">
@@ -235,7 +262,6 @@ const OPDListPage = () => {
               />
             </div>
           </div>
-          {/* Appointment Cards: mapped for all three tabs */}
           <TabsContent value="today" className="space-y-6 mt-0">
             <AppointmentsList
               filteredAppointments={filteredAppointments}
@@ -281,7 +307,6 @@ const OPDListPage = () => {
   )
 }
 
-// Extracted for DRYness: Card grid for all three tabs
 function AppointmentsList({
   filteredAppointments,
   isLoading,
@@ -292,7 +317,17 @@ function AppointmentsList({
   handleDeleteAppointment,
   searchTerm,
   label,
-}: any) {
+}: {
+  filteredAppointments: OPDAppointment[];
+  isLoading: boolean;
+  getAppointmentType: (serviceInfo: any[] | null) => string;
+  getTotalAmount: (paymentInfo: any) => number;
+  formatDate: (dateString: string) => string;
+  handleEditAppointment: (appointment: OPDAppointment) => void;
+  handleDeleteAppointment: (opdId: number) => Promise<void>;
+  searchTerm: string;
+  label: string;
+}) {
   return (
     <Card className="shadow-lg border border-gray-200 rounded-xl">
       <CardHeader className="pb-4">
@@ -326,7 +361,6 @@ function AppointmentsList({
               >
                 <CardContent className="p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <div className="flex-1 space-y-3">
-                    {/* Name and UHID always visible */}
                     <div className="flex items-center gap-3">
                       <h3 className="font-extrabold text-xl text-gray-900">
                         {appointment.patient_detail?.name || (
@@ -340,12 +374,10 @@ function AppointmentsList({
                         {getAppointmentType(appointment.service_info)}
                       </Badge>
                     </div>
-                    {/* UHID always visible */}
                     <div className="flex items-center space-x-2 text-sm text-gray-700">
                       <span className="font-semibold">UHID:</span>
                       <span>{appointment.patient_detail?.uhid || appointment.uhid_from_registration}</span>
                     </div>
-                    {/* If patient_detail is null, show a warning and the raw UHID */}
                     {!appointment.patient_detail && (
                       <div className="text-sm text-red-600">
                         <span>⚠️ No patient details found for UHID: </span>
@@ -354,7 +386,6 @@ function AppointmentsList({
                         </span>
                       </div>
                     )}
-                    {/* Number and Age always visible */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-700">
                       <div className="flex items-center space-x-2">
                         <Phone className="h-4 w-4 text-gray-500" />
@@ -377,14 +408,13 @@ function AppointmentsList({
                       </div>
                       <div className="flex items-center space-x-2">
                         <Calendar className="h-4 w-4 text-gray-500" />
-                        <span>{formatDate(appointment.created_at)}</span>
+                        <span>{formatDate(appointment.date)}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <IndianRupeeIcon className="h-4 w-4 text-gray-500" />
                         <span>Amount: ₹{getTotalAmount(appointment.payment_info)}</span>
                       </div>
                     </div>
-                    {/* Address, Referred by, Services, etc. */}
                     {appointment.patient_detail?.address && (
                       <div className="flex items-center space-x-2 text-sm text-gray-700">
                         <MapPin className="h-4 w-4 text-gray-500" />
@@ -415,7 +445,6 @@ function AppointmentsList({
                       </div>
                     )}
                   </div>
-                  {/* Actions */}
                   <div className="flex flex-col space-y-3 sm:ml-6 w-full sm:w-auto">
                     <Button
                       size="sm"
