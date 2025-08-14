@@ -113,8 +113,8 @@ const DPRPage = () => {
           opd_id,
           date
         `)
-        .gte('date', start)
-        .lte('date', end);
+        .gte('created_at', start)
+        .lte('created_at', end);
       if (opdError) {
         console.error("Supabase OPD fetch error:", opdError);
         throw opdError;

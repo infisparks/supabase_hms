@@ -578,12 +578,8 @@ const DashboardPage: React.FC = () => {
             uhid
           `);
 
-        // For today filter, use simple date comparison for date
-        if (filters.filterType === 'today') {
-          opdQuery = opdQuery.eq('date', todayDateString);
-        } else {
-          opdQuery = opdQuery.gte(dateColumnForOPD, start).lte(dateColumnForOPD, end);
-        }
+        // Always filter OPD by `created_at`
+        opdQuery = opdQuery.gte('created_at', start).lte('created_at', end);
 
         const { data: opdData, error: opdError } = await opdQuery;
 
@@ -610,8 +606,8 @@ const DashboardPage: React.FC = () => {
               patientId: patientDetail?.uhid || appt.uhid || "N/A",
               name: patientDetail?.name || "Unknown",
               phone: patientDetail?.number ? String(patientDetail.number) : "N/A",
-              date: format(opdDate, "yyyy-MM-dd"), // Directly format
-              time: format(createdAtDate, "HH:mm"), // Directly format
+              date: format(createdAtDate, "yyyy-MM-dd"), // Use created_at for date
+              time: format(createdAtDate, "HH:mm"), // Use created_at for time
               modalities: (appt.service_info as IModality[]) || [],
               payment: (appt.payment_info as IPayment) || {
                 cashAmount: 0,
@@ -649,12 +645,8 @@ const DashboardPage: React.FC = () => {
             ipd_notes
           `);
 
-        // For today filter, use simple date comparison for admission_date
-        if (filters.filterType === 'today') {
-          ipdQuery = ipdQuery.eq('admission_date', todayDateString);
-        } else {
-          ipdQuery = ipdQuery.gte(dateColumnForIPD, start).lte(dateColumnForIPD, end);
-        }
+        // Always filter IPD by `created_at`
+        ipdQuery = ipdQuery.gte('created_at', start).lte('created_at', end);
 
         const { data: ipdData, error: ipdError } = await ipdQuery;
 
@@ -692,14 +684,27 @@ const DashboardPage: React.FC = () => {
               ) {
                 totalDiscount += p.amount;
               }
-            });
+            })
 
             const services = (ipdRecord.service_detail || []) as IPDService[]
             const totalServiceAmount = services.reduce((sum, s) => sum + s.amount, 0)
             const remaining = totalServiceAmount - totalDeposit - totalDiscount + totalRefunds;
+            
+            // Fetch patient details and room type separately like in main dashboard
+            const patientDetail = await fetchPatientDetailByUhid(ipdRecord.uhid);
+            const roomType = await fetchRoomTypeByBedId(ipdRecord.bed_id);
+            
+            // Parse created_at for date and time display
+            const createdAtDate = parseISO(ipdRecord.created_at);
+            
+            // Debug logging for each IPD appointment
+            console.log('IPD appointment patient detail:', {
+              uhid: ipdRecord.uhid,
+              patientDetail: patientDetail,
+              name: patientDetail?.name || "Unknown",
+              phone: patientDetail?.number || "N/A"
+            });
 
-            const patientDetail = await fetchPatientDetailByUhid(ipdRecord.uhid); // Fetch patient details here
-            const roomType = await fetchRoomTypeByBedId(ipdRecord.bed_id); // Fetch room type here
             return {
               ...ipdRecord,
               type: "IPD",
@@ -713,8 +718,8 @@ const DashboardPage: React.FC = () => {
               discount: totalDiscount,
               remainingAmount: remaining,
               roomType: roomType || "N/A",
-              admission_date: ipdRecord.admission_date, // Directly use from DB
-              admission_time: ipdRecord.admission_time, // Directly use from DB
+              admission_date: format(createdAtDate, "yyyy-MM-dd"), // Use created_at for admission_date
+              admission_time: format(createdAtDate, "HH:mm"), // Use created_at for admission_time
               ipd_notes: ipdRecord.ipd_notes || null,
             }
           })
@@ -729,14 +734,14 @@ const DashboardPage: React.FC = () => {
           `);
 
         // Always filter by ot_date (the selected OT date), not by created_at or IPD admission date
+        // The existing logic already handles ot_date correctly for today/other filters, so no change needed here.
+        // For today filter, use date range comparison for ot_date
+        const todayStart = `${todayDateString}T00:00:00+05:30`;
+        const todayEnd = `${todayDateString}T23:59:59+05:30`;
         if (filters.filterType === 'today') {
-          // For today filter, use date range comparison for ot_date
-          const todayStart = `${todayDateString}T00:00:00+05:30`;
-          const todayEnd = `${todayDateString}T23:59:59+05:30`;
-          otQuery = otQuery.gte('ot_date', todayStart).lte('ot_date', todayEnd);
+            otQuery = otQuery.gte('ot_date', todayStart).lte('ot_date', todayEnd);
         } else {
-          // For other filters, also use ot_date but with the selected date range
-          otQuery = otQuery.gte('ot_date', start).lte('ot_date', end);
+            otQuery = otQuery.gte('ot_date', start).lte('ot_date', end);
         }
 
         const { data: otData, error: otError } = await otQuery;
@@ -880,15 +885,16 @@ const DashboardPage: React.FC = () => {
         let timeStr: string | null
 
         if (app.type === "IPD") {
-          dateStr = app.admission_date
-          timeStr = app.admission_time
+          // IPD now uses created_at for date and time
+          dateStr = app.admission_date; // This is now formatted created_at date
+          timeStr = app.admission_time; // This is now formatted created_at time
         } else if (app.type === "OT") {
           dateStr = app.date // Use the already formatted `date` (ot_date in IST)
           timeStr = app.time // Use the already formatted `time` (created_at time in IST)
         } else {
-          // OPD
-          dateStr = app.date
-          timeStr = app.time // OPD time is derived from created_at
+          // OPD now uses created_at for date and time
+          dateStr = app.date; // This is now formatted created_at date
+          timeStr = app.time; // This is now formatted created_at time
         }
 
         // Combine date and time and parse as an ISO string directly
@@ -1101,8 +1107,8 @@ const DashboardPage: React.FC = () => {
             patientId: patientDetail?.uhid || appt.uhid || "N/A",
             name: patientDetail?.name || "Unknown",
             phone: patientDetail?.number ? String(patientDetail.number) : "N/A",
-            date: format(opdDate, "yyyy-MM-dd"),
-            time: format(createdAtDate, "HH:mm"),
+            date: format(createdAtDate, "yyyy-MM-dd"), // Use created_at for date
+            time: format(createdAtDate, "HH:mm"), // Use created_at for time
             modalities: (appt.service_info as IModality[]) || [],
             payment: (appt.payment_info as IPayment) || {
               cashAmount: 0,
@@ -1145,26 +1151,37 @@ const DashboardPage: React.FC = () => {
           let totalDiscount = 0
 
           payments.forEach((p) => {
+            const amtType = p.amountType?.toLowerCase();
             const pType = p.type?.toLowerCase();
             const pPaymentType = p.paymentType?.toLowerCase();
             const pTransactionType = p.transactionType?.toLowerCase();
 
-            if (pType === "advance" || pType === "deposit" || pTransactionType === "settlement") {
+            if (
+              amtType === "advance" || amtType === "deposit" || amtType === "settlement" ||
+              pType === "advance" || pType === "deposit" || pTransactionType === "settlement"
+            ) {
               totalDeposit += p.amount;
-            } else if (pType === "refund" || pTransactionType === "refund") {
+            } else if (
+              amtType === "refund" || pType === "refund" || pTransactionType === "refund"
+            ) {
               totalRefunds += p.amount;
-            } else if (pType === "discount" || pPaymentType === "bill_reduction") {
+            } else if (
+              amtType === "discount" || pType === "discount" || pPaymentType === "bill_reduction"
+            ) {
               totalDiscount += p.amount;
             }
           })
 
           const services = (ipdRecord.service_detail || []) as IPDService[]
           const totalServiceAmount = services.reduce((sum, s) => sum + s.amount, 0)
-          const remaining = totalServiceAmount - totalDeposit - totalDiscount + totalRefunds
+          const remaining = totalServiceAmount - totalDeposit - totalDiscount + totalRefunds;
           
           // Fetch patient details and room type separately like in main dashboard
           const patientDetail = await fetchPatientDetailByUhid(ipdRecord.uhid);
           const roomType = await fetchRoomTypeByBedId(ipdRecord.bed_id);
+          
+          // Parse created_at for date and time display
+          const createdAtDate = parseISO(ipdRecord.created_at);
           
           // Debug logging for each IPD appointment
           console.log('IPD appointment patient detail:', {
@@ -1187,8 +1204,8 @@ const DashboardPage: React.FC = () => {
             discount: totalDiscount,
             remainingAmount: remaining,
             roomType: roomType || "N/A",
-            admission_date: ipdRecord.admission_date, // Directly use from DB
-            admission_time: ipdRecord.admission_time, // Directly use from DB
+            admission_date: format(createdAtDate, "yyyy-MM-dd"), // Use created_at for admission_date
+            admission_time: format(createdAtDate, "HH:mm"), // Use created_at for admission_time
             ipd_notes: ipdRecord.ipd_notes || null,
           }
         }))
