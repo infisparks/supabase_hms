@@ -72,6 +72,10 @@ interface OtDetailsSupabase {
   ot_date: string; // ISO string
   created_at: string;
   doctor_id: number | null; // Added doctor_id
+  has_baby_birth: boolean | null; // New field
+  baby_birth_date: string | null; // New field
+  baby_birth_weight: number | null; // New field
+  baby_birth_gender: "Male" | "Female" | "Other" | null; // New field
 }
 
 // Interface for Doctor
@@ -88,6 +92,10 @@ interface OTFormInputs {
   otNotes: string | null;
   otDate: string;
   otDoctorId: number | undefined; // Added for doctor selection
+  hasBabyBirth: boolean; // New field for checkbox
+  babyBirthDate: string | null; // New field
+  babyBirthWeight: number | null; // New field
+  babyBirthGender: "Male" | "Female" | "Other" | undefined; // New field
 }
 
 // --- Validation Schema ---
@@ -98,6 +106,29 @@ const otSchema = yup.object().shape({
   otNotes: yup.string().nullable(),
   otDate: yup.string().required("OT Date is required"),
   otDoctorId: yup.number().nullable().required("Operating Doctor is required"), // Added validation for doctor
+  hasBabyBirth: yup.boolean(), // Validation for checkbox
+  babyBirthDate: yup.string().nullable().when("hasBabyBirth", {
+    is: true,
+    then: (schema) => schema.required("Baby Birth Date is required if 'Baby Birth' is checked"),
+    otherwise: (schema) => schema.notRequired(),
+  }),
+  babyBirthWeight: yup.number().nullable().when("hasBabyBirth", {
+    is: true,
+    then: (schema) =>
+      schema
+        .min(0.1, "Weight must be positive")
+        .max(10, "Weight seems too high")
+        .typeError("Baby Birth Weight must be a number"),
+    otherwise: (schema) => schema.notRequired(),
+  }),
+  babyBirthGender: yup.string().nullable().when("hasBabyBirth", {
+    is: true,
+    then: (schema) =>
+      schema
+        .oneOf(["Male", "Female", "Other"], "Invalid Gender")
+        .required("Baby Birth Gender is required if 'Baby Birth' is checked"),
+    otherwise: (schema) => schema.notRequired(),
+  }),
 });
 
 export default function OTPage() {
@@ -113,6 +144,7 @@ export default function OTPage() {
   const [searchTerm, setSearchTerm] = useState(""); // For doctor search
   const [isDoctorDropdownOpen, setIsDoctorDropdownOpen] = useState(false); // To control dropdown visibility
   const [showClearConfirm, setShowClearConfirm] = useState(false); // State for confirmation pop-up
+  const [hasBabyBirthChecked, setHasBabyBirthChecked] = useState(false); // New state for baby birth checkbox
 
   const getCurrentDate = () => {
     const today = new Date();
@@ -133,6 +165,10 @@ export default function OTPage() {
       otNotes: null,
       otDate: getCurrentDate(),
       otDoctorId: undefined, // Default for doctor
+      hasBabyBirth: false, // Default for new field
+      babyBirthDate: null,
+      babyBirthWeight: null,
+      babyBirthGender: undefined,
     },
     mode: "onBlur",
   });
@@ -228,6 +264,10 @@ export default function OTPage() {
           otNotes: otData.ot_notes,
           otDate: existingOtDate,
           otDoctorId: otData.doctor_id || undefined, // Set existing doctor ID
+          hasBabyBirth: otData.has_baby_birth || false, // Set existing baby birth fields
+          babyBirthDate: otData.baby_birth_date || null,
+          babyBirthWeight: otData.baby_birth_weight || null,
+          babyBirthGender: otData.baby_birth_gender || undefined,
         });
         // Set search term to selected doctor's name if available for display
         if (doctorsData && otData.doctor_id) {
@@ -245,6 +285,10 @@ export default function OTPage() {
           otNotes: null,
           otDate: getCurrentDate(),
           otDoctorId: undefined, // Reset doctor for new entry
+          hasBabyBirth: false, // Reset baby birth fields for new entry
+          babyBirthDate: null,
+          babyBirthWeight: null,
+          babyBirthGender: undefined,
         });
         setSearchTerm(""); // Clear search for new entry
       }
@@ -280,6 +324,10 @@ export default function OTPage() {
         ot_notes: formData.otNotes,
         ot_date: otDateISO,
         doctor_id: formData.otDoctorId || null, // Include doctor_id, ensure null if undefined
+        has_baby_birth: formData.hasBabyBirth || null, // Include baby birth fields
+        baby_birth_date: formData.babyBirthDate || null,
+        baby_birth_weight: formData.babyBirthWeight || null,
+        baby_birth_gender: formData.babyBirthGender || null,
       };
 
       let error = null;
@@ -332,6 +380,10 @@ export default function OTPage() {
         otNotes: null,
         otDate: getCurrentDate(),
         otDoctorId: undefined,
+        hasBabyBirth: false, // Reset baby birth fields for new entry
+        babyBirthDate: null,
+        babyBirthWeight: null,
+        babyBirthGender: undefined,
       });
       setSearchTerm(""); // Clear doctor search term
     } catch (err: any) {
@@ -585,6 +637,84 @@ export default function OTPage() {
                         )}
                         {errors.otDoctorId && (
                           <p className="text-red-500 text-xs mt-1">{errors.otDoctorId.message}</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label htmlFor="hasBabyBirth" className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                          <User size={16} className="mr-2 text-teal-600" /> Baby Birth Details (Optional)
+                        </label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="hasBabyBirth"
+                            checked={hasBabyBirthChecked}
+                            onChange={(e) => {
+                              setHasBabyBirthChecked(e.target.checked);
+                              setValue("hasBabyBirth", e.target.checked);
+                              setValue("babyBirthDate", null);
+                              setValue("babyBirthWeight", null);
+                              setValue("babyBirthGender", undefined);
+                            }}
+                            className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
+                          />
+                          <label htmlFor="hasBabyBirth" className="text-sm text-gray-700">Baby Birth Details</label>
+                        </div>
+                        {hasBabyBirthChecked && (
+                          <>
+                            <div className="mt-4">
+                              <label htmlFor="babyBirthDate" className="block text-sm font-medium text-gray-700 mb-2">
+                                Baby Birth Date <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="date"
+                                id="babyBirthDate"
+                                {...register("babyBirthDate")}
+                                className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
+                                  ${errors.babyBirthDate ? "border-red-500" : "border-gray-300"}
+                                  focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                              />
+                              {errors.babyBirthDate && (
+                                <p className="text-red-500 text-xs mt-1">{errors.babyBirthDate.message}</p>
+                              )}
+                            </div>
+                            <div className="mt-4">
+                              <label htmlFor="babyBirthWeight" className="block text-sm font-medium text-gray-700 mb-2">
+                                Baby Birth Weight (kg) <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="number"
+                                id="babyBirthWeight"
+                                {...register("babyBirthWeight")}
+                                className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
+                                  ${errors.babyBirthWeight ? "border-red-500" : "border-gray-300"}
+                                  focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                              />
+                              {errors.babyBirthWeight && (
+                                <p className="text-red-500 text-xs mt-1">{errors.babyBirthWeight.message}</p>
+                              )}
+                            </div>
+                            <div className="mt-4">
+                              <label htmlFor="babyBirthGender" className="block text-sm font-medium text-gray-700 mb-2">
+                                Baby Birth Gender <span className="text-red-500">*</span>
+                              </label>
+                              <select
+                                id="babyBirthGender"
+                                {...register("babyBirthGender")}
+                                className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
+                                  ${errors.babyBirthGender ? "border-red-500" : "border-gray-300"}
+                                  focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                              >
+                                <option value="">Select Gender</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                                <option value="Other">Other</option>
+                              </select>
+                              {errors.babyBirthGender && (
+                                <p className="text-red-500 text-xs mt-1">{errors.babyBirthGender.message}</p>
+                              )}
+                            </div>
+                          </>
                         )}
                       </div>
 

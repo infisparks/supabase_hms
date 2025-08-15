@@ -125,7 +125,7 @@ const OPDListPage = () => {
 
       filtered = filtered.filter((appointment) => {
         try {
-          const appointmentDate = parseISO(appointment.date); // Parse as local time
+          const appointmentDate = parseISO(appointment.created_at); // Parse as local time
           return appointmentDate >= todayStart && appointmentDate <= todayEnd;
         } catch (e) {
           console.error("Error parsing appointment date for filtering:", appointment.date, e);
@@ -138,7 +138,7 @@ const OPDListPage = () => {
 
       filtered = filtered.filter((appointment) => {
         try {
-          const appointmentDate = parseISO(appointment.date); // Parse as local time
+          const appointmentDate = parseISO(appointment.created_at); // Parse as local time
           return appointmentDate >= weekStart && appointmentDate <= weekEnd;
         } catch (e) {
           console.error("Error parsing appointment date for filtering:", appointment.date, e);

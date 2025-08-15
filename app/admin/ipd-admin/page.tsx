@@ -44,6 +44,8 @@ import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip as Ch
 import { Bar } from "react-chartjs-2" // Correctly import the Bar component
 ChartJS.register(BarElement, CategoryScale, LinearScale, ChartTooltip, ChartLegend)
 
+import * as XLSX from "xlsx"
+import { saveAs } from "file-saver"
 
 // ----- Type Definitions (from your DashboardPage, for consistency) -----
 
@@ -146,6 +148,12 @@ interface IPDRegistrationSupabaseJoined { // Renamed from your original `IPDRegi
   discharge_summaries?: {
     discharge_type: string | null;
   }[] | null;
+  // Add the financial summary properties directly to this interface
+  totalGrossBill?: number;
+  totalPaidAmount?: number;
+  totalRefundedAmount?: number;
+  totalDiscountAmount?: number;
+  netBalance?: number;
 }
 
 // OT Details (from Supabase `ot_details` table)
@@ -428,7 +436,55 @@ export default function IPDAdminPage() {
         setPatients([])
         return
       }
-      setPatients(data as unknown as IPDRegistrationSupabaseJoined[])
+
+      const processedPatients: IPDRegistrationSupabaseJoined[] = (data || []).map((patient: any) => {
+        const payments = (patient.payment_detail || []) as IPDPayment[];
+        const services = (patient.service_detail || []) as IPDService[];
+
+        let totalGrossBill = 0;
+        services.forEach(s => {
+          totalGrossBill += s.amount;
+        });
+
+        let totalPaidAmount = 0;
+        let totalRefundedAmount = 0;
+        let totalDiscountAmount = 0;
+
+        payments.forEach(p => {
+          const amtType = p.amountType?.toLowerCase();
+          const pType = p.type?.toLowerCase();
+          const pPaymentType = p.paymentType?.toLowerCase();
+          const pTransactionType = p.transactionType?.toLowerCase();
+
+          if (
+            amtType === "advance" || amtType === "deposit" || amtType === "settlement" ||
+            pType === "advance" || pType === "deposit" || pTransactionType === "settlement"
+          ) {
+            totalPaidAmount += p.amount;
+          } else if (
+            amtType === "refund" || pType === "refund" || pTransactionType === "refund"
+          ) {
+            totalRefundedAmount += p.amount;
+          } else if (
+            amtType === "discount" || pType === "discount" || pPaymentType === "bill_reduction"
+          ) {
+            totalDiscountAmount += p.amount;
+          }
+        });
+
+        const netBalance = totalGrossBill - totalPaidAmount - totalDiscountAmount + totalRefundedAmount;
+
+        return {
+          ...patient,
+          totalGrossBill,
+          totalPaidAmount,
+          totalRefundedAmount,
+          totalDiscountAmount,
+          netBalance,
+        };
+      });
+
+      setPatients(processedPatients);
     } catch (error) {
       console.error("Error in fetchPatients:", error)
       toast.error("Error loading patient list.")
@@ -458,6 +514,55 @@ export default function IPDAdminPage() {
     }
     return null;
   };
+
+  // Helper function to get discharge status and styling
+  const getDischargeStatus = (dischargeDate: string | null | undefined, bedStatus: string | null | undefined, dischargeType: string | null | undefined) => {
+    if (!dischargeDate) {
+      return {
+        status: "Admitted",
+        color: "bg-green-100 text-green-800",
+        icon: "🟢"
+      }
+    }
+    
+    // Use the actual discharge_type from discharge_summaries if available
+    if (dischargeType) {
+      if (dischargeType === "Discharge") {
+        return {
+          status: "Discharged",
+          color: "bg-blue-100 text-blue-800",
+          icon: "🔵"
+        }
+      } else if (dischargeType === "Discharge Partially") {
+        return {
+          status: "Partially Discharged",
+          color: "bg-yellow-100 text-yellow-800",
+          icon: "🟡"
+        }
+      } else if (dischargeType === "Death") {
+        return {
+          status: "Death",
+          color: "bg-red-100 text-red-800",
+          icon: "⚫"
+        }
+      }
+    }
+    
+    // Fallback to bed status logic if discharge_type is not available
+    if (bedStatus === "available") {
+      return {
+        status: "Discharged",
+        color: "bg-blue-100 text-blue-800",
+        icon: "🔵"
+      }
+    }
+    
+    return {
+      status: "Partially Discharged",
+      color: "bg-yellow-100 text-yellow-800",
+      icon: "🟡"
+    }
+  }
 
   // Filters patients based on search term and discharge status (applied after date filtering)
   const filteredPatients = useMemo(() => {
@@ -517,6 +622,63 @@ export default function IPDAdminPage() {
     setFilterEndDate(null)
     setDischargeStatusFilter(null)
   }
+
+  const handleExportExcel = useCallback(() => {
+    if (filteredPatients.length === 0) {
+      toast.info("No patients to export.")
+      return
+    }
+
+    const dataToExport = filteredPatients.map((patient) => {
+      const dischargeType = getDischargeType(patient.discharge_summaries);
+      const dischargeStatus = getDischargeStatus(patient.discharge_date, patient.bed_management?.status, dischargeType);
+
+      return {
+        "IPD ID": patient.ipd_id,
+        "UHID": patient.uhid || "N/A",
+        "Patient ID": patient.patient_detail?.patient_id || "N/A",
+        "Patient Name": patient.patient_detail?.name || "Unknown",
+        "Phone Number": patient.patient_detail?.number ? String(patient.patient_detail.number) : "N/A",
+        "Age": patient.patient_detail?.age || "N/A",
+        "Gender": patient.patient_detail?.gender || "N/A",
+        "Address": patient.patient_detail?.address || "N/A",
+        "Admission Date": patient.admission_date ? format(parseISO(patient.admission_date), "dd MMM, yyyy") : "N/A",
+        "Admission Time": patient.admission_time || "N/A",
+        "Discharge Date": patient.discharge_date ? format(parseISO(patient.discharge_date), "dd MMM, yyyy") : "N/A",
+        "Discharge Status": dischargeStatus.status,
+        "Under Care Of Doctor": patient.under_care_of_doctor || "N/A",
+        "Room Type": patient.bed_management?.room_type || "N/A",
+        "Bed Number": patient.bed_management?.bed_number || "N/A",
+        "Total Gross Bill": patient.totalGrossBill,
+        "Total Payments Received": patient.totalPaidAmount,
+        "Total Refunds": patient.totalRefundedAmount,
+        "Total Discount": patient.totalDiscountAmount,
+        "Net Balance": patient.netBalance,
+        "Admission Source": patient.admission_source || "N/A",
+        "Admission Type": patient.admission_type || "N/A",
+        "Relative Name": patient.relative_name || "N/A",
+        "Relative Phone": patient.relative_ph_no || "N/A",
+        "Relative Address": patient.relative_address || "N/A",
+        "Services": (patient.service_detail || []).map((s: IPDService) => `${s.serviceName} (${s.amount})`).join("; ") || "N/A",
+        "Payments": (patient.payment_detail || []).map((p: IPDPayment) => `${p.type}: ${p.amount} (${p.paymentType})`).join("; ") || "N/A",
+      }
+    })
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, "IPD Patients")
+
+    let filename = "IPD_Patients"
+    if (filterStartDate && filterEndDate) {
+      filename += `_Custom_${format(parseISO(filterStartDate), "yyyyMMdd")}_to_${format(parseISO(filterEndDate), "yyyyMMdd")}`
+    } else if (dischargeStatusFilter) {
+      filename += `_${dischargeStatusFilter}`
+    }
+    filename += ".xlsx"
+
+    XLSX.writeFile(workbook, filename)
+    toast.success("IPD data exported successfully!")
+  }, [filteredPatients, filterStartDate, filterEndDate, dischargeStatusFilter, getDischargeType, getDischargeStatus])
 
   // Handles opening the patient history modal and fetching detailed data
   const handleViewPatientHistory = useCallback(async (ipdId: number) => {
@@ -630,7 +792,7 @@ export default function IPDAdminPage() {
   // Helper to aggregate consultant charges for display in the modal
   const aggregatedConsultantCharges = useMemo(() => {
     if (!selectedPatientForHistory) return {} as Record<string, any>
-    const consultantChargeItems = selectedPatientForHistory.services.filter((s) => s.type === "doctorvisit")
+    const consultantChargeItems = (selectedPatientForHistory.services || []).filter((s: IPDService) => s.type === "doctorvisit")
     return consultantChargeItems.reduce(
       (acc, item) => {
         const key = item.doctorName || "Unknown"
@@ -673,8 +835,8 @@ export default function IPDAdminPage() {
   }, [selectedPatientForHistory]);
 
   const consultantChargeTotal = useMemo(() => {
-    return selectedPatientForHistory?.services
-      .filter((s) => s.type === "doctorvisit")
+    return (selectedPatientForHistory?.services || [])
+      .filter((s: IPDService) => s.type === "doctorvisit")
       .reduce((sum, s) => sum + s.amount, 0) || 0
   }, [selectedPatientForHistory]);
 
@@ -698,55 +860,6 @@ export default function IPDAdminPage() {
         </div>
       </Layout>
     )
-  }
-
-  // Helper function to get discharge status and styling
-  const getDischargeStatus = (dischargeDate: string | null | undefined, bedStatus: string | null | undefined, dischargeType: string | null | undefined) => {
-    if (!dischargeDate) {
-      return {
-        status: "Admitted",
-        color: "bg-green-100 text-green-800",
-        icon: "🟢"
-      }
-    }
-    
-    // Use the actual discharge_type from discharge_summaries if available
-    if (dischargeType) {
-      if (dischargeType === "Discharge") {
-        return {
-          status: "Discharged",
-          color: "bg-blue-100 text-blue-800",
-          icon: "🔵"
-        }
-      } else if (dischargeType === "Discharge Partially") {
-        return {
-          status: "Partially Discharged",
-          color: "bg-yellow-100 text-yellow-800",
-          icon: "🟡"
-        }
-      } else if (dischargeType === "Death") {
-        return {
-          status: "Death",
-          color: "bg-red-100 text-red-800",
-          icon: "⚫"
-        }
-      }
-    }
-    
-    // Fallback to bed status logic if discharge_type is not available
-    if (bedStatus === "available") {
-      return {
-        status: "Discharged",
-        color: "bg-blue-100 text-blue-800",
-        icon: "🔵"
-      }
-    }
-    
-    return {
-      status: "Partially Discharged",
-      color: "bg-yellow-100 text-yellow-800",
-      icon: "🟡"
-    }
   }
 
   return (
@@ -1017,6 +1130,12 @@ export default function IPDAdminPage() {
                     <X size={14} className="mr-1" /> Clear All Filters
                   </button>
                 )}
+                <button
+                  onClick={handleExportExcel}
+                  className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors text-sm flex items-center"
+                >
+                  Export to Excel
+                </button>
               </div>
             </div>
             

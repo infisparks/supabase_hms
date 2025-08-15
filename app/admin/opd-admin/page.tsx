@@ -42,6 +42,9 @@ import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip as Ch
 import { Bar } from "react-chartjs-2"
 ChartJS.register(BarElement, CategoryScale, LinearScale, ChartTooltip, Legend)
 
+import * as XLSX from "xlsx"
+import { saveAs } from "file-saver"
+
 interface IModality {
   charges: number
   doctor?: string
@@ -569,6 +572,55 @@ const AdminDashboardPage: React.FC = () => {
     }
   }
 
+  const handleExportExcel = useCallback(() => {
+    if (filteredAppointments.length === 0) {
+      toast.info("No appointments to export.")
+      return
+    }
+
+    const dataToExport = filteredAppointments.map((appt) => ({
+      "OPD ID": appt.id,
+      "Patient ID": appt.patientId,
+      "Patient Name": appt.name,
+      "Phone Number": appt.phone,
+      Age: appt.age,
+      Gender: appt.gender,
+      Address: appt.address,
+      "Appointment Type": appt.appointmentType,
+      "Appointment Date": format(parseISO(appt.createdAt), "yyyy-MM-dd"),
+      "Appointment Time": format(parseISO(appt.createdAt), "HH:mm"),
+      "Entered By": appt.enteredBy,
+      "Additional Notes": appt.message,
+      "Referred By": appt.referredBy,
+      "Visit Type": appt.visitType,
+      "Total Charges": appt.payment.totalCharges,
+      "Cash Amount": appt.payment.cashAmount,
+      "Online Amount": appt.payment.onlineAmount,
+      Discount: appt.payment.discount,
+      "Total Paid": appt.payment.totalPaid,
+      "Payment Method": appt.payment.paymentMethod,
+      Services: getModalitiesSummary(appt.modalities),
+    }))
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, "OPD Appointments")
+
+    // Generate a filename based on the current filter
+    let filename = "OPD_Appointments"
+    if (filters.filterType === "today") {
+      filename += `_Today_${format(new Date(), "yyyyMMdd")}`
+    } else if (filters.filterType === "7days") {
+      filename += `_Last7Days_${format(subDays(new Date(), 6), "yyyyMMdd")}_to_${format(new Date(), "yyyyMMdd")}`
+    } else if (filters.filterType === "custom" && filters.startDate && filters.endDate) {
+      filename += `_Custom_${format(parseISO(filters.startDate), "yyyyMMdd")}_to_${format(parseISO(filters.endDate), "yyyyMMdd")}`
+    }
+    filename += ".xlsx"
+
+    XLSX.writeFile(workbook, filename)
+    toast.success("OPD data exported successfully!")
+  }, [filteredAppointments, filters])
+
   if (loading) {
     return (
       <Layout>
@@ -640,6 +692,10 @@ const AdminDashboardPage: React.FC = () => {
                     </Button>
                   </div>
                 )}
+                
+                <Button onClick={handleExportExcel} variant="secondary" className="bg-green-500 hover:bg-green-600 text-white">
+                  Export to Excel
+                </Button>
                 
                 <Button onClick={handleRefresh} disabled={refreshing} variant="outline">
                   <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />

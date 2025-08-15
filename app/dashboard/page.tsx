@@ -156,6 +156,10 @@ interface OTDetailsSupabase {
   created_at: string // timestamp with time zone (ISO string)
   // This is re-added because fetchAllAppointmentsForPatient explicitly joins it
   patient_detail?: PatientDetailFromSupabase[] | null
+  has_baby_birth: boolean | null; // New field
+  baby_birth_date: string | null; // New field
+  baby_birth_weight: number | null; // New field
+  baby_birth_gender: "Male" | "Female" | "Other" | null; // New field
 }
 
 // Combined types for display in tables/modals
@@ -221,6 +225,10 @@ interface OTAppointmentDisplay {
   ot_notes: string | null
   ot_date: string // original ISO string from DB
   created_at: string // original ISO string from DB
+  has_baby_birth: boolean | null; // New field
+  baby_birth_date: string | null; // New field
+  baby_birth_weight: number | null; // New field
+  baby_birth_gender: "Male" | "Female" | "Other" | null; // New field
 }
 
 type CombinedAppointment = OPDAppointmentDisplay | IPDAppointmentDisplay | OTAppointmentDisplay
@@ -241,6 +249,10 @@ interface FilterState {
   selectedMonth: string
   startDate: string
   endDate: string
+  showOnlyOpd: boolean; // New filter
+  showOnlyIpd: boolean; // New filter
+  showOnlyOt: boolean; // New filter
+  showOnlyBabyBirth: boolean; // New filter
 }
 
 // ----- Helper Functions (NO CLIENT-SIDE TIMEZONE CONVERSION FOR DISPLAY) -----
@@ -359,6 +371,10 @@ const DashboardPage: React.FC = () => {
     selectedMonth: format(new Date(), "yyyy-MM"), // Default month for current date
     startDate: "",
     endDate: "",
+    showOnlyOpd: false, // New filter
+    showOnlyIpd: false, // New filter
+    showOnlyOt: false, // New filter
+    showOnlyBabyBirth: false, // New filter
   })
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [refreshing, setRefreshing] = useState<boolean>(false)
@@ -563,28 +579,31 @@ const DashboardPage: React.FC = () => {
         }
 
         // Fetch OPD data
-        let opdQuery = supabase
-          .from("opd_registration")
-          .select(`
-            opd_id,
-            created_at,
-            patient_id,
-            date,
-            refer_by,
-            "additional Notes",
-            service_info,
-            payment_info,
-            bill_no,
-            uhid
-          `);
+        let opdData: OPDRegistrationSupabase[] | null = [];
+        if (!filters.showOnlyIpd && !filters.showOnlyOt && !filters.showOnlyBabyBirth) { // Only fetch if not exclusively filtering for OPD/OT/Baby Birth
+          let opdQuery = supabase
+            .from("opd_registration")
+            .select(`
+              opd_id,
+              created_at,
+              patient_id,
+              date,
+              refer_by,
+              "additional Notes",
+              service_info,
+              payment_info,
+              bill_no,
+              uhid
+            `);
 
-        // Always filter OPD by `created_at`
-        opdQuery = opdQuery.gte('created_at', start).lte('created_at', end);
+          // Always filter OPD by `created_at`
+          opdQuery = opdQuery.gte('created_at', start).lte('created_at', end);
 
-        const { data: opdData, error: opdError } = await opdQuery;
+          const { data, error } = await opdQuery;
+          if (error) throw error;
+          opdData = data;
+        }
 
-        if (opdError) throw opdError
-        // Fetch patient details for each OPD record dynamically
         const mappedOpd: OPDAppointmentDisplay[] = await Promise.all(
           ((opdData as OPDRegistrationSupabase[]) || []).map(async (appt) => {
             const patientDetail = await fetchPatientDetailByUhid(appt.uhid); // Fetch patient details here
@@ -630,27 +649,30 @@ const DashboardPage: React.FC = () => {
         setOpdAppointments(mappedOpd)
 
         // Fetch IPD data
-        let ipdQuery = supabase
-          .from("ipd_registration")
-          .select(`
-            ipd_id,
-            uhid,
-            admission_date,
-            admission_time,
-            under_care_of_doctor,
-            payment_detail,
-            service_detail,
-            created_at,
-            bed_id,
-            ipd_notes
-          `);
+        let ipdData: IPDRegistrationSupabase[] | null = [];
+        if (!filters.showOnlyOpd && !filters.showOnlyOt && !filters.showOnlyBabyBirth) { // Only fetch if not exclusively filtering for OPD/OT/Baby Birth
+          let ipdQuery = supabase
+            .from("ipd_registration")
+            .select(`
+              ipd_id,
+              uhid,
+              admission_date,
+              admission_time,
+              under_care_of_doctor,
+              payment_detail,
+              service_detail,
+              created_at,
+              bed_id,
+              ipd_notes
+            `);
 
-        // Always filter IPD by `created_at`
-        ipdQuery = ipdQuery.gte('created_at', start).lte('created_at', end);
+          // Always filter IPD by `created_at`
+          ipdQuery = ipdQuery.gte('created_at', start).lte('created_at', end);
 
-        const { data: ipdData, error: ipdError } = await ipdQuery;
-
-        if (ipdError) throw ipdError
+          const { data, error } = await ipdQuery;
+          if (error) throw error;
+          ipdData = data;
+        }
         
         // Debug logging for IPD results
         if (filters.filterType === 'today') {
@@ -727,27 +749,38 @@ const DashboardPage: React.FC = () => {
         setIpdAppointments(mappedIpd)
 
         // Fetch OT data
-        let otQuery = supabase
-          .from("ot_details")
-          .select(`
-            id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at
-          `);
+        let otData: OTDetailsSupabase[] | null = [];
+        if (!filters.showOnlyOpd && !filters.showOnlyIpd) { // Only fetch if not exclusively filtering for OPD/IPD
+          let otQuery = supabase
+            .from("ot_details")
+            .select(
+              `
+                id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at, has_baby_birth, baby_birth_date, baby_birth_weight, baby_birth_gender
+              `,
+            )
+            .order("created_at", { ascending: false })
 
-        // Always filter by ot_date (the selected OT date), not by created_at or IPD admission date
-        // The existing logic already handles ot_date correctly for today/other filters, so no change needed here.
-        // For today filter, use date range comparison for ot_date
-        const todayStart = `${todayDateString}T00:00:00+05:30`;
-        const todayEnd = `${todayDateString}T23:59:59+05:30`;
-        if (filters.filterType === 'today') {
-            otQuery = otQuery.gte('ot_date', todayStart).lte('ot_date', todayEnd);
-        } else {
-            otQuery = otQuery.gte('ot_date', start).lte('ot_date', end);
+          // Always filter by ot_date (the selected OT date), not by created_at or IPD admission date
+          // The existing logic already handles ot_date correctly for today/other filters, so no change needed here.
+          // For today filter, use date range comparison for ot_date
+          const todayStart = `${todayDateString}T00:00:00+05:30`;
+          const todayEnd = `${todayDateString}T23:59:59+05:30`;
+          if (filters.filterType === 'today') {
+              otQuery = otQuery.gte('ot_date', todayStart).lte('ot_date', todayEnd);
+          } else {
+              otQuery = otQuery.gte('ot_date', start).lte('ot_date', end);
+          }
+
+          // Add filter for only baby births if selected
+          if (filters.showOnlyBabyBirth) {
+            otQuery = otQuery.eq('has_baby_birth', true);
+          }
+
+          const { data, error } = await otQuery;
+          if (error) throw error;
+          otData = data;
         }
 
-        const { data: otData, error: otError } = await otQuery;
-
-        if (otError) throw otError
-        
         // Debug logging for OT results
         if (filters.filterType === 'today') {
           console.log('OT query results for today (filtered by ot_date):', otData?.length || 0, 'records');
@@ -784,6 +817,10 @@ const DashboardPage: React.FC = () => {
               date: format(otDate, "yyyy-MM-dd"), // Directly format
               time: format(createdAtDate, "HH:mm"), // Directly format
               message: otRecord.ot_notes || "No notes",
+              has_baby_birth: otRecord.has_baby_birth,
+              baby_birth_date: otRecord.baby_birth_date,
+              baby_birth_weight: otRecord.baby_birth_weight,
+              baby_birth_gender: otRecord.baby_birth_gender,
             }
           })
         );
@@ -801,7 +838,7 @@ const DashboardPage: React.FC = () => {
       }
     }
     fetchAppointments()
-  }, [filters.searchQuery, currentDateRange]) // Re-run effect when searchQuery or currentDateRange changes
+  }, [filters.searchQuery, currentDateRange, filters.showOnlyOpd, filters.showOnlyIpd, filters.showOnlyOt, filters.showOnlyBabyBirth]) // Re-run effect when searchQuery or currentDateRange changes
 
   // Statistics
   const statistics = useMemo(() => {
@@ -861,6 +898,7 @@ const DashboardPage: React.FC = () => {
       totalIpdAmount: netIpdContribution, // This is now net deposits after refunds (deposits - refunds)
       overallIpdRefunds: totalIpdRefunds,
       totalOtCount: otAppointments.length, // This already gives the count of OT procedures
+      totalBabyBirths: otAppointments.filter(ot => ot.has_baby_birth).length, // New: Total baby births
       opdCash,
       opdOnline,
       ipdCash,
@@ -874,7 +912,22 @@ const DashboardPage: React.FC = () => {
     if (filters.searchQuery) {
       return [] // In search mode, this memo is not used for display
     }
-    const all: CombinedAppointment[] = [...opdAppointments, ...ipdAppointments, ...otAppointments]
+    let all: CombinedAppointment[] = [...opdAppointments, ...ipdAppointments, ...otAppointments]
+    
+    // Apply new filters
+    if (filters.showOnlyOpd) {
+      all = all.filter(app => app.type === "OPD");
+    }
+    if (filters.showOnlyIpd) {
+      all = all.filter(app => app.type === "IPD");
+    }
+    if (filters.showOnlyOt) {
+      all = all.filter(app => app.type === "OT");
+    }
+    if (filters.showOnlyBabyBirth) {
+      all = all.filter(app => app.type === "OT" && (app as OTAppointmentDisplay).has_baby_birth);
+    }
+
     const list = all
 
     // Sorting by date (most recent first)
@@ -907,7 +960,7 @@ const DashboardPage: React.FC = () => {
       return dateTimeB.getTime() - dateTimeA.getTime()
     })
     return list
-  }, [opdAppointments, ipdAppointments, otAppointments, filters.searchQuery])
+  }, [opdAppointments, ipdAppointments, otAppointments, filters.searchQuery, filters.showOnlyOpd, filters.showOnlyIpd, filters.showOnlyOt, filters.showOnlyBabyBirth])
 
   // Doctor consultations
   const doctorConsultations = useMemo(() => {
@@ -1014,6 +1067,10 @@ const DashboardPage: React.FC = () => {
         endDate: "",
         selectedMonth: format(new Date(), "yyyy-MM"),
         searchQuery: "",
+        showOnlyOpd: false, // Reset new filters
+        showOnlyIpd: false,
+        showOnlyOt: false,
+        showOnlyBabyBirth: false,
       }))
     } else if (upd.filterType === "week") {
       setFilters((p) => ({
@@ -1023,6 +1080,10 @@ const DashboardPage: React.FC = () => {
         endDate: "",
         selectedMonth: format(new Date(), "yyyy-MM"),
         searchQuery: "",
+        showOnlyOpd: false, // Reset new filters
+        showOnlyIpd: false,
+        showOnlyOt: false,
+        showOnlyBabyBirth: false,
       }))
     } else if (upd.filterType === "month") {
       setFilters((p) => ({
@@ -1032,6 +1093,20 @@ const DashboardPage: React.FC = () => {
         endDate: "",
         selectedMonth: upd.selectedMonth || format(new Date(), "yyyy-MM"),
         searchQuery: "",
+        showOnlyOpd: false, // Reset new filters
+        showOnlyIpd: false,
+        showOnlyOt: false,
+        showOnlyBabyBirth: false,
+      }))
+    } else if (upd.filterType === "dateRange") {
+      setFilters((p) => ({
+        ...p,
+        ...upd,
+        searchQuery: "",
+        showOnlyOpd: false, // Reset new filters
+        showOnlyIpd: false,
+        showOnlyOt: false,
+        showOnlyBabyBirth: false,
       }))
     } else {
       setFilters((p) => ({ ...p, ...upd }))
@@ -1045,6 +1120,10 @@ const DashboardPage: React.FC = () => {
       selectedMonth: format(new Date(), "yyyy-MM"),
       startDate: "",
       endDate: "",
+      showOnlyOpd: false,
+      showOnlyIpd: false,
+      showOnlyOt: false,
+      showOnlyBabyBirth: false,
     })
 
   // Modal for individual appointment details
@@ -1215,10 +1294,9 @@ const DashboardPage: React.FC = () => {
           .from("ot_details")
           .select(
             `
-              id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at
+              id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at, has_baby_birth, baby_birth_date, baby_birth_weight, baby_birth_gender
             `,
           )
-          .eq("uhid", uhid)
           .order("created_at", { ascending: false })
 
         if (otError) throw otError
@@ -1252,6 +1330,10 @@ const DashboardPage: React.FC = () => {
             date: format(otDate, "yyyy-MM-dd"), // Directly format
             time: format(createdAtDate, "HH:mm"), // Directly format
             message: otRecord.ot_notes || "No notes",
+            has_baby_birth: otRecord.has_baby_birth,
+            baby_birth_date: otRecord.baby_birth_date,
+            baby_birth_weight: otRecord.baby_birth_weight,
+            baby_birth_gender: otRecord.baby_birth_gender,
           }
         }))
         allPatientApps.push(...mappedOt)
@@ -1480,6 +1562,48 @@ const DashboardPage: React.FC = () => {
                     />
                   </div>
                 </div>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="showOnlyOpd"
+                      checked={filters.showOnlyOpd}
+                      onChange={(e) => handleFilterChange({ showOnlyOpd: e.target.checked, showOnlyIpd: false, showOnlyOt: false, showOnlyBabyBirth: false })}
+                      className="h-4 w-4 text-sky-600 focus:ring-sky-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="showOnlyOpd" className="ml-2 text-sm font-medium text-gray-700">Show only OPD</label>
+                  </div>
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="showOnlyIpd"
+                      checked={filters.showOnlyIpd}
+                      onChange={(e) => handleFilterChange({ showOnlyIpd: e.target.checked, showOnlyOpd: false, showOnlyOt: false, showOnlyBabyBirth: false })}
+                      className="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="showOnlyIpd" className="ml-2 text-sm font-medium text-gray-700">Show only IPD</label>
+                  </div>
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="showOnlyOt"
+                      checked={filters.showOnlyOt}
+                      onChange={(e) => handleFilterChange({ showOnlyOt: e.target.checked, showOnlyOpd: false, showOnlyIpd: false, showOnlyBabyBirth: false })}
+                      className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="showOnlyOt" className="ml-2 text-sm font-medium text-gray-700">Show only OT</label>
+                  </div>
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="showOnlyBabyBirth"
+                      checked={filters.showOnlyBabyBirth}
+                      onChange={(e) => handleFilterChange({ showOnlyBabyBirth: e.target.checked, showOnlyOpd: false, showOnlyIpd: false, showOnlyOt: false })}
+                      className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="showOnlyBabyBirth" className="ml-2 text-sm font-medium text-gray-700">Show only Baby Birth</label>
+                  </div>
+                </div>
                 <div className="mt-4 p-3 bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg border border-sky-200 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center">
@@ -1559,6 +1683,24 @@ const DashboardPage: React.FC = () => {
                       <span className="text-lg font-semibold text-purple-600">{statistics.totalOtCount}</span>
                     </div>
                   </Card>
+                  {/* Baby Births Card */}
+                  {statistics.totalBabyBirths > 0 && (
+                    <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="p-3 bg-gradient-to-r from-teal-100 to-cyan-100 rounded-full shadow-md">
+                          <User className="text-teal-600 h-6 w-6" />
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-500 text-sm">Baby Births</p>
+                          <p className="text-2xl font-bold text-gray-900">{statistics.totalBabyBirths}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-600">Total</span>
+                        <span className="text-lg font-semibold text-teal-600">{statistics.totalBabyBirths}</span>
+                      </div>
+                    </Card>
+                  )}
                   {/* Total Revenue */}
                   <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
                     <div className="flex items-center justify-between mb-4">
@@ -2323,19 +2465,74 @@ const DashboardPage: React.FC = () => {
                   )}
                   {/* OT Details */}
                   {selectedAppointment.type === "OT" && (
-                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 shadow-sm">
-                      <h3 className="text-lg font-semibold text-purple-800 mb-4 flex items-center">
-                        <Stethoscope className="mr-2 h-5 w-5" /> OT Details
-                      </h3>
-                      <div className="space-y-3">
-                        <div>
-                          <p className="text-sm text-gray-500">Time</p>
-                          <p className="font-medium">{(selectedAppointment as OTAppointmentDisplay).time}</p>
+                    <div className="space-y-6">
+                      <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 shadow-sm">
+                        <h3 className="text-lg font-semibold text-purple-800 mb-4 flex items-center">
+                          <Stethoscope className="mr-2 h-5 w-5" /> OT Details
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-3">
+                            <div>
+                              <p className="text-sm text-gray-500">OT Type</p>
+                              <p className="font-medium capitalize">
+                                {(selectedAppointment as OTAppointmentDisplay).ot_type}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">OT Date</p>
+                              <p className="font-medium">
+                                {format(
+                                  parseISO((selectedAppointment as OTAppointmentDisplay).ot_date),
+                                  "dd MMM, yyyy",
+                                )}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">Time</p>
+                              <p className="font-medium">
+                                {(selectedAppointment as OTAppointmentDisplay).time}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="space-y-3">
+                            <div>
+                              <p className="text-sm text-gray-500">Notes</p>
+                              <p className="font-medium">
+                                {(selectedAppointment as OTAppointmentDisplay).ot_notes || 'No notes'}
+                              </p>
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm text-gray-500">Procedure Notes</p>
-                          <p className="font-medium">{(selectedAppointment as OTAppointmentDisplay).message}</p>
-                        </div>
+
+                        {(selectedAppointment as OTAppointmentDisplay).has_baby_birth && (
+                          <div className="mt-6 p-4 bg-teal-50 rounded-lg border border-teal-200 shadow-inner">
+                            <h4 className="text-md font-semibold text-teal-800 mb-3 flex items-center">
+                              <User className="mr-2 h-4 w-4" /> Baby Birth Details
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <p className="text-gray-600">Birth Date:</p>
+                                <p className="font-medium text-gray-900">
+                                  {((selectedAppointment as OTAppointmentDisplay).baby_birth_date &&
+                                    format(parseISO((selectedAppointment as OTAppointmentDisplay).baby_birth_date!), 'dd MMM, yyyy')) || 'N/A'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-600">Weight:</p>
+                                <p className="font-medium text-gray-900">
+                                  {((selectedAppointment as OTAppointmentDisplay).baby_birth_weight !== null &&
+                                    `${(selectedAppointment as OTAppointmentDisplay).baby_birth_weight} kg`) || 'N/A'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-600">Gender:</p>
+                                <p className="font-medium text-gray-900">
+                                  {((selectedAppointment as OTAppointmentDisplay).baby_birth_gender) || 'N/A'}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
