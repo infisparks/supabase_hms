@@ -299,12 +299,17 @@ const DPRPage = () => {
         const xrayApiDate = format(parseISO(selectedDate), 'dd-MM-yyyy');
         const hospitalName = process.env.NEXT_PUBLIC_LAB_HOSPITAL_NAME || '';
 
+        if (!process.env.NEXT_PUBLIC_LAB_API_KEY) {
+          console.error("NEXT_PUBLIC_LAB_API_KEY is not set. Skipping X-ray count API call.");
+          return;
+        }
+
         const res = await fetch('https://labapi.infispark.in/rest/v1/rpc/get_registration_count_xray', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'apikey': process.env.NEXT_PUBLIC_LAB_API_KEY || '',
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_LAB_API_KEY}` || '',
+            'apikey': process.env.NEXT_PUBLIC_LAB_API_KEY,
+            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_LAB_API_KEY}`,
           },
           body: JSON.stringify({ p_date: xrayApiDate, p_hospital: hospitalName })
         });
