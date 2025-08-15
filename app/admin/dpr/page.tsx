@@ -199,7 +199,6 @@ const DPRPage = () => {
 
       let totalCasualtyOPD = 0;
       let totalConsultantOPD = 0;
-      let totalXray = 0;
       let totalDialysis = 0;
 
       opdAppointments?.forEach((appointment: any) => {
@@ -263,6 +262,39 @@ const DPRPage = () => {
         }
       } catch (e) {
         console.warn('Error while fetching pathology count', e)
+      }
+
+      // Fetch X-ray count from external API
+      let totalXray = 0;
+      try {
+        const xrayApiDate = format(parseISO(selectedDate), 'dd-MM-yyyy');
+        const hospitalName = process.env.NEXT_PUBLIC_LAB_HOSPITAL_NAME || '';
+
+        const res = await fetch('https://labapi.infispark.in/rest/v1/rpc/get_registration_count_xray', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': process.env.NEXT_PUBLIC_LAB_API_KEY || '',
+            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_LAB_API_KEY}` || '',
+          },
+          body: JSON.stringify({ p_date: xrayApiDate, p_hospital: hospitalName })
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          // Assuming the API returns an array with the count in the first element
+          if (typeof json === 'number') {
+            totalXray = json;
+          } else if (json && Array.isArray(json) && json.length > 0 && typeof json[0].count === 'number') {
+            totalXray = json[0].count;
+          } else {
+            console.warn('X-ray API response format unexpected:', json);
+          }
+        } else {
+          console.warn('Failed to fetch X-ray count from API:', res.status, res.statusText);
+        }
+      } catch (e) {
+        console.warn('Error while fetching X-ray count:', e);
       }
 
       setKpiData({

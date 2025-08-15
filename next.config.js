@@ -7,6 +7,11 @@ const nextConfig = {
     unoptimized: true, // Set to false for production to enable optimization
   },
 
+  env: {
+    NEXT_PUBLIC_LAB_API_KEY: process.env.LAB_API_KEY,
+    NEXT_PUBLIC_LAB_HOSPITAL_NAME: process.env.LAB_HOSPITAL_NAME,
+  },
+
   transpilePackages: [
     'recharts',
     'cmdk',
