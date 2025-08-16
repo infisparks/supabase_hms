@@ -36,6 +36,7 @@ import {
 import Layout from "@/components/global/Layout"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
+import Image from "next/image" // Import the Image component
 // --- Type Definitions ---
 interface PatientDetailSupabase {
   patient_id: number
@@ -404,9 +405,16 @@ export default function IPDManagementPage() {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="container mx-auto px-4 py-8">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold text-slate-800 mb-2">IPD Billing Management</h1>
-            <p className="text-slate-500">Manage and track in-patient billing records and admissions</p>
+        
+          {/* Banner Image */}
+          <div className="mb-8 flex justify-center">
+            <Image
+              src="/banner.png"
+              alt="Hospital Banner"
+              width={1200}
+              height={200}
+              className="rounded-xl shadow-2xl transition-all duration-300 hover:shadow-lg hover:scale-[1.005]"
+            />
           </div>
           {/* Removed Stats Cards */}
           {/* <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
