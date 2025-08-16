@@ -174,6 +174,7 @@ const ServiceTab: React.FC<ServiceTabProps> = ({
                   type="number"
                   {...registerService("quantity")}
                   min="1"
+                  step="1"
                   placeholder="e.g., 1"
                   className={`w-full px-3 py-2 rounded-lg border ${
                     errorsService.quantity ? "border-red-500" : "border-gray-300"
