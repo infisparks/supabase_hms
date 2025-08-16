@@ -35,6 +35,7 @@ import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { format, isToday, isThisWeek, parseISO, startOfDay, endOfDay, startOfWeek, endOfWeek } from "date-fns"
+import Image from "next/image" // Import Image component
 
 // Patient detail object
 interface PatientDetail {
@@ -99,15 +100,15 @@ const OPDListPage = () => {
         opd_id: appt.opd_id,
         created_at: appt.created_at,
         date: appt.date,
-        refer_by: appt.refer_by ?? null,
-        'additional Notes': appt['additional Notes'] ?? null,
-        service_info: appt.service_info || [],
+        refer_by: appt.refer_by,
+        service_info: appt.service_info,
         payment_info: appt.payment_info,
         uhid_from_registration: appt.uhid,
-        patient_detail: appt.patient_detail || null,
+        patient_detail: appt.patient_detail,
       }))
       setAppointments(processedData)
-    } catch (error) {
+    } catch (err) {
+      console.error("Error fetching appointments:", err)
       toast.error("An unexpected error occurred while fetching appointments.")
     } finally {
       setIsLoading(false)
@@ -117,101 +118,104 @@ const OPDListPage = () => {
   const filterAppointments = useCallback(() => {
     let filtered = appointments
 
-    const now = new Date(); // Current local time
+    const today = startOfDay(new Date())
+    const endOfToday = endOfDay(new Date())
+    const startOfThisWeek = startOfWeek(new Date(), { weekStartsOn: 1 }) // Monday
+    const endOfThisWeek = endOfWeek(new Date(), { weekStartsOn: 1 }) // Sunday
 
     if (activeTab === "today") {
-      const todayStart = startOfDay(now);
-      const todayEnd = endOfDay(now);
-
-      filtered = filtered.filter((appointment) => {
-        try {
-          const appointmentDate = parseISO(appointment.created_at); // Parse as local time
-          return appointmentDate >= todayStart && appointmentDate <= todayEnd;
-        } catch (e) {
-          console.error("Error parsing appointment date for filtering:", appointment.date, e);
-          return false;
-        }
-      });
+      filtered = filtered.filter((appt) => {
+        const apptDate = parseISO(appt.date) // Parse the date string from DB
+        return apptDate >= today && apptDate <= endOfToday
+      })
     } else if (activeTab === "week") {
-      const weekStart = startOfWeek(now, { weekStartsOn: 1 }); // Monday as start of week
-      const weekEnd = endOfWeek(now, { weekStartsOn: 1 });     // Sunday as end of week
-
-      filtered = filtered.filter((appointment) => {
-        try {
-          const appointmentDate = parseISO(appointment.created_at); // Parse as local time
-          return appointmentDate >= weekStart && appointmentDate <= weekEnd;
-        } catch (e) {
-          console.error("Error parsing appointment date for filtering:", appointment.date, e);
-          return false;
-        }
-      });
+      filtered = filtered.filter((appt) => {
+        const apptDate = parseISO(appt.date)
+        return apptDate >= startOfThisWeek && apptDate <= endOfThisWeek
+      })
     }
 
     if (searchTerm) {
       const lowerCaseSearchTerm = searchTerm.toLowerCase()
       filtered = filtered.filter(
-        (appointment) =>
-          appointment.patient_detail?.name?.toLowerCase().includes(lowerCaseSearchTerm) ||
-          String(appointment.patient_detail?.number || "").includes(lowerCaseSearchTerm) ||
-          String(appointment.patient_detail?.uhid || "").toLowerCase().includes(lowerCaseSearchTerm) ||
-          appointment.uhid_from_registration.toLowerCase().includes(lowerCaseSearchTerm)
+        (appt) =>
+          appt.patient_detail?.name.toLowerCase().includes(lowerCaseSearchTerm) ||
+          appt.patient_detail?.number?.includes(lowerCaseSearchTerm) ||
+          appt.uhid_from_registration.toLowerCase().includes(lowerCaseSearchTerm) ||
+          String(appt.opd_id).toLowerCase().includes(lowerCaseSearchTerm),
       )
     }
+
     setFilteredAppointments(filtered)
   }, [appointments, searchTerm, activeTab])
 
-  const handleDeleteAppointment = async (opdId: number) => {
-    try {
-      const { error } = await supabase.from("opd_registration").delete().eq("opd_id", opdId)
-      
-      if (error) {
-        toast.error("Failed to delete appointment: " + error.message)
-        throw error
-      }
-      toast.success("Appointment deleted successfully!")
-      fetchAppointments()
-    } catch (error) {
-      console.error("Delete error:", error);
-      toast.error("Failed to delete appointment.")
-    }
+  const getTotalAmount = (paymentInfo: any) => {
+    if (!paymentInfo) return 0
+    return (paymentInfo.cashAmount || 0) + (paymentInfo.onlineAmount || 0)
   }
+
+  const getAppointmentType = (serviceInfo: any[] | null) => {
+    if (!serviceInfo || serviceInfo.length === 0) return "N/A"
+    const types = serviceInfo.map((s) => s.type)
+    const uniqueTypes = [...new Set(types)]
+    return uniqueTypes.join(", ")
+  }
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "N/A"
+    try {
+      // Attempt to parse as ISO string first (e.g., "2023-11-08T00:00:00.000Z")
+      const date = parseISO(dateString);
+      // Check if it's a valid date after parsing
+      if (isNaN(date.getTime())) {
+          // If not valid, try parsing as a simple date string (e.g., "2023-11-08")
+          return format(new Date(dateString), "MMM dd, yyyy");
+      }
+      return format(date, "MMM dd, yyyy");
+    } catch (error) {
+      console.error("Error formatting date:", dateString, error);
+      return "Invalid Date";
+    }
+  };
 
   const handleEditAppointment = (appointment: OPDAppointment) => {
     router.push(`/opd/appointment/${appointment.opd_id}`)
   }
 
-  const getAppointmentType = (serviceInfo: any[] | null) => {
-    if (Array.isArray(serviceInfo) && serviceInfo.some((service) => service.type === "consultation")) {
-      return "OPD"
-    }
-    return "General"
-  }
-
-  const getTotalAmount = (paymentInfo: any) => {
-    return (typeof paymentInfo === 'object' && paymentInfo !== null && typeof paymentInfo.totalPaid === 'number')
-      ? paymentInfo.totalPaid
-      : 0
-  }
-
-  const formatDate = (dateString: string) => {
+  const handleDeleteAppointment = async (opd_id: number) => {
     try {
-      if (!dateString) return "Invalid Date"
-      return format(parseISO(dateString), "MMM dd, yyyy - hh:mm a")
-    } catch (e) {
-      console.error("Error formatting date:", dateString, e);
-      return "Invalid Date"
+      const { error } = await supabase.from("opd_registration").delete().eq("opd_id", opd_id)
+      if (error) throw error
+      toast.success("Appointment deleted successfully.")
+      fetchAppointments() // Refresh the list
+    } catch (error) {
+      console.error("Error deleting appointment:", error)
+      toast.error("Failed to delete appointment.")
     }
   }
 
   return (
     <Layout>
-      <div className="space-y-8 p-4 md:p-8 bg-gray-50 min-h-screen">
+      <div className="space-y-8 bg-gray-50 min-h-screen p-0">
+        {/* Banner Image */}
+        <div className="flex justify-center mb-0">
+          <Image
+            src="/banner.png"
+            alt="Hospital Banner"
+            width={1300}
+            height={300}
+            className="rounded-lg shadow-md transition-all duration-300 hover:shadow-lg"
+          />
+        </div>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <h1 className="text-4xl font-extrabold text-gray-900">OPD Management</h1>
-            <p className="text-lg text-gray-600 mt-1">View and manage outpatient department appointments</p>
+            {/* Removed OPD Management Title */}
+            {/* <h1 className="text-4xl font-extrabold text-gray-900">OPD Management</h1> */}
+            {/* Removed OPD Management Description */}
+            {/* <p className="text-lg text-gray-600 mt-1">View and manage outpatient department appointments</p> */}
           </div>
-          <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3 w-full md:w-auto">
+          {/* Removed Refresh and New Appointment Buttons */}
+          {/* <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3 w-full md:w-auto">
             <Button
               onClick={() => router.push("/opd/appointment")}
               className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-md"
@@ -228,8 +232,9 @@ const OPDListPage = () => {
               <RefreshCw className={`h-5 w-5 mr-2 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
-          </div>
+          </div> */}
         </div>
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <div className="flex flex-col md:flex-row gap-4 items-center">
             <TabsList className="grid w-full grid-cols-3 bg-gray-200 rounded-lg p-1 md:w-auto">
@@ -276,30 +281,60 @@ const OPDListPage = () => {
             />
           </TabsContent>
           <TabsContent value="week" className="space-y-6 mt-0">
-            <AppointmentsList
-              filteredAppointments={filteredAppointments}
-              isLoading={isLoading}
-              getAppointmentType={getAppointmentType}
-              getTotalAmount={getTotalAmount}
-              formatDate={formatDate}
-              handleEditAppointment={handleEditAppointment}
-              handleDeleteAppointment={handleDeleteAppointment}
-              searchTerm={searchTerm}
-              label="This Week's Appointments"
-            />
+            <Card className="mb-6 shadow-lg border border-gray-200 rounded-xl">
+              <CardHeader className="pb-4">
+                <CardTitle className="flex items-center justify-between text-2xl font-bold text-gray-800">
+                  <span>This Week's Appointments</span>
+                  <Badge
+                    variant="secondary"
+                    className="bg-emerald-100 text-emerald-800 px-3 py-1 text-base rounded-full"
+                  >
+                    {filteredAppointments.length} appointments
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <AppointmentsList
+                  filteredAppointments={filteredAppointments}
+                  isLoading={isLoading}
+                  getAppointmentType={getAppointmentType}
+                  getTotalAmount={getTotalAmount}
+                  formatDate={formatDate}
+                  handleEditAppointment={handleEditAppointment}
+                  handleDeleteAppointment={handleDeleteAppointment}
+                  searchTerm={searchTerm}
+                  label="This Week's Appointments"
+                />
+              </CardContent>
+            </Card>
           </TabsContent>
           <TabsContent value="all" className="space-y-6 mt-0">
-            <AppointmentsList
-              filteredAppointments={filteredAppointments}
-              isLoading={isLoading}
-              getAppointmentType={getAppointmentType}
-              getTotalAmount={getTotalAmount}
-              formatDate={formatDate}
-              handleEditAppointment={handleEditAppointment}
-              handleDeleteAppointment={handleDeleteAppointment}
-              searchTerm={searchTerm}
-              label="All Appointments"
-            />
+            <Card className="mb-6 shadow-lg border border-gray-200 rounded-xl">
+              <CardHeader className="pb-4">
+                <CardTitle className="flex items-center justify-between text-2xl font-bold text-gray-800">
+                  <span>All Appointments</span>
+                  <Badge
+                    variant="secondary"
+                    className="bg-emerald-100 text-emerald-800 px-3 py-1 text-base rounded-full"
+                  >
+                    {filteredAppointments.length} appointments
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <AppointmentsList
+                  filteredAppointments={filteredAppointments}
+                  isLoading={isLoading}
+                  getAppointmentType={getAppointmentType}
+                  getTotalAmount={getTotalAmount}
+                  formatDate={formatDate}
+                  handleEditAppointment={handleEditAppointment}
+                  handleDeleteAppointment={handleDeleteAppointment}
+                  searchTerm={searchTerm}
+                  label="All Appointments"
+                />
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
@@ -307,7 +342,19 @@ const OPDListPage = () => {
   )
 }
 
-function AppointmentsList({
+interface AppointmentsListProps {
+  filteredAppointments: OPDAppointment[]
+  isLoading: boolean
+  getAppointmentType: (serviceInfo: any[] | null) => string
+  getTotalAmount: (paymentInfo: any) => number
+  formatDate: (dateString: string) => string
+  handleEditAppointment: (appointment: OPDAppointment) => void
+  handleDeleteAppointment: (opd_id: number) => void
+  searchTerm: string
+  label: string
+}
+
+const AppointmentsList: React.FC<AppointmentsListProps> = ({
   filteredAppointments,
   isLoading,
   getAppointmentType,
@@ -317,19 +364,27 @@ function AppointmentsList({
   handleDeleteAppointment,
   searchTerm,
   label,
-}: {
-  filteredAppointments: OPDAppointment[];
-  isLoading: boolean;
-  getAppointmentType: (serviceInfo: any[] | null) => string;
-  getTotalAmount: (paymentInfo: any) => number;
-  formatDate: (dateString: string) => string;
-  handleEditAppointment: (appointment: OPDAppointment) => void;
-  handleDeleteAppointment: (opdId: number) => Promise<void>;
-  searchTerm: string;
-  label: string;
-}) {
+}) => {
+  if (isLoading) {
+    return (
+      <div className="text-center py-12 text-gray-500 text-lg flex flex-col items-center">
+        <RefreshCw className="h-8 w-8 animate-spin mb-4 text-emerald-600" />
+        Loading appointments...
+      </div>
+    )
+  }
+
+  if (filteredAppointments.length === 0) {
+    return (
+      <div className="text-center py-12 text-gray-500 text-lg">
+        {searchTerm ? "No appointments found matching your search." : `No appointments found.`}
+        <p className="mt-2 text-base">Click "New Appointment" to add one!</p>
+      </div>
+    )
+  }
+
   return (
-    <Card className="shadow-lg border border-gray-200 rounded-xl">
+    <Card className="mb-6 shadow-lg border border-gray-200 rounded-xl">
       <CardHeader className="pb-4">
         <CardTitle className="flex items-center justify-between text-2xl font-bold text-gray-800">
           <span>{label}</span>
