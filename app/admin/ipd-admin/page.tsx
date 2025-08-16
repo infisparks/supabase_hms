@@ -154,6 +154,7 @@ interface IPDRegistrationSupabaseJoined { // Renamed from your original `IPDRegi
   totalRefundedAmount?: number;
   totalDiscountAmount?: number;
   netBalance?: number;
+  mrd?: string; // Added mrd field
 }
 
 // OT Details (from Supabase `ot_details` table)
@@ -409,7 +410,8 @@ export default function IPDAdminPage() {
           bed_management (id, room_type, bed_number, bed_type, status),
           service_detail,
           payment_detail,
-          discharge_summaries (discharge_type)
+          discharge_summaries (discharge_type),
+          mrd
         `, // Added service_detail, payment_detail, and discharge_summaries for table calculations if needed, or for pre-fetching for modal
       )
 
@@ -426,7 +428,7 @@ export default function IPDAdminPage() {
         query = query.lte("admission_date", endOfFilterPeriodUTC);
       }
 
-      query = query.order("admission_date", { ascending: false }) // Order by most recent admissions
+      query = query.order("admission_date", { ascending: true }) // Order by oldest admissions first
 
       const { data, error } = await query
 
@@ -633,34 +635,44 @@ export default function IPDAdminPage() {
       const dischargeType = getDischargeType(patient.discharge_summaries);
       const dischargeStatus = getDischargeStatus(patient.discharge_date, patient.bed_management?.status, dischargeType);
 
+      // Calculate Reg, Bed/Nursing, and Dr Visit amounts
+      let regAmount = 0;
+      let bedNursingAmount = 0;
+      let drVisitAmount = 0;
+      const consultantNames: string[] = [];
+
+      (patient.service_detail || []).forEach((service) => {
+        if (service.serviceName.toLowerCase().includes("registration charges")) {
+          regAmount += service.amount;
+        }
+        if (service.serviceName.toLowerCase().includes("bed / nursing")) {
+          bedNursingAmount += service.amount;
+        }
+        if (service.type === "doctorvisit" && service.doctorName) {
+          drVisitAmount += service.amount;
+          if (!consultantNames.includes(service.doctorName)) {
+            consultantNames.push(service.doctorName);
+          }
+        }
+      });
+
       return {
-        "IPD ID": patient.ipd_id,
-        "UHID": patient.uhid || "N/A",
-        "Patient ID": patient.patient_detail?.patient_id || "N/A",
-        "Patient Name": patient.patient_detail?.name || "Unknown",
-        "Phone Number": patient.patient_detail?.number ? String(patient.patient_detail.number) : "N/A",
-        "Age": patient.patient_detail?.age || "N/A",
-        "Gender": patient.patient_detail?.gender || "N/A",
-        "Address": patient.patient_detail?.address || "N/A",
-        "Admission Date": patient.admission_date ? format(parseISO(patient.admission_date), "dd MMM, yyyy") : "N/A",
-        "Admission Time": patient.admission_time || "N/A",
-        "Discharge Date": patient.discharge_date ? format(parseISO(patient.discharge_date), "dd MMM, yyyy") : "N/A",
-        "Discharge Status": dischargeStatus.status,
-        "Under Care Of Doctor": patient.under_care_of_doctor || "N/A",
-        "Room Type": patient.bed_management?.room_type || "N/A",
-        "Bed Number": patient.bed_management?.bed_number || "N/A",
-        "Total Gross Bill": patient.totalGrossBill,
-        "Total Payments Received": patient.totalPaidAmount,
-        "Total Refunds": patient.totalRefundedAmount,
-        "Total Discount": patient.totalDiscountAmount,
-        "Net Balance": patient.netBalance,
-        "Admission Source": patient.admission_source || "N/A",
-        "Admission Type": patient.admission_type || "N/A",
-        "Relative Name": patient.relative_name || "N/A",
-        "Relative Phone": patient.relative_ph_no || "N/A",
-        "Relative Address": patient.relative_address || "N/A",
-        "Services": (patient.service_detail || []).map((s: IPDService) => `${s.serviceName} (${s.amount})`).join("; ") || "N/A",
-        "Payments": (patient.payment_detail || []).map((p: IPDPayment) => `${p.type}: ${p.amount} (${p.paymentType})`).join("; ") || "N/A",
+        "MRD #": patient.mrd || "N/A",
+        "Bill no.": patient.ipd_id,
+        "DOD": patient.discharge_date ? format(parseISO(patient.discharge_date), "dd-MM-yy") : "N/A",
+        "Pt Name": patient.patient_detail?.name || "Unknown",
+        "Consultant": consultantNames.join(", ") || "N/A",
+        "Type": "", // Keep empty as requested
+        "Ref by": patient.admission_source || "", // Display admission_source or empty string
+        "Reg": regAmount > 0 ? regAmount : "",
+        "Bed/Nursing": bedNursingAmount > 0 ? bedNursingAmount : "",
+        "Dr Visit": drVisitAmount > 0 ? drVisitAmount : "",
+        "Hospital Services": "", // Keep empty as requested
+        "Patho": "", // Keep empty as requested
+        "Medicines": "", // Keep empty as requested
+        "Total Bill Amt": patient.totalGrossBill,
+        "Final Bill Rcvd": patient.totalPaidAmount,
+        "Discount": patient.totalDiscountAmount,
       }
     })
 

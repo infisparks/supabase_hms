@@ -102,6 +102,7 @@ interface IPDFormInput {
   date: string;
   time: string;
   id?: number; // Optional for updates
+  mrd?: string | null; // Added new field for MRD
 }
 
 // --- End Type Definitions ---
@@ -192,6 +193,7 @@ const IPDAppointmentPage = () => {
     bed: null, // Initialize as null to match type
     date: new Date().toISOString().split("T")[0],
     time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }), // Default to current time (24-hour)
+    mrd: null,
   })
 
   // Effect to automatically set 'through' when paymentMode changes
@@ -706,6 +708,7 @@ const IPDAppointmentPage = () => {
           relative_address: formData.relativeAddress,
           admission_date: formData.date,
           admission_time: formData.time,
+          mrd: formData.mrd || null,
         })
         .select()
 
@@ -1187,6 +1190,16 @@ Medford Hospital
                     />
                   </div>
                 )}
+                <div className="space-y-2">
+                  <Label htmlFor="mrd">MRD Number (Optional)</Label>
+                  <Input
+                    id="mrd"
+                    placeholder="Enter MRD number"
+                    value={formData.mrd || ''}
+                    onChange={(e) => setFormData((prev: IPDFormInput) => ({ ...prev, mrd: e.target.value }))}
+                    className="placeholder-gray-400"
+                  />
+                </div>
 
                 <div className="space-y-2">
                   <Label>Admission Type</Label>
@@ -1564,6 +1577,12 @@ Medford Hospital
                       {beds.find((b) => b.id === formData.bed)?.bed_type}
                     </p>
                   </div>
+                  {formData.mrd && (
+                    <div className="bg-white p-3 rounded-md shadow-sm">
+                      <span className="font-medium text-gray-500">MRD Number:</span>
+                      <p className="font-semibold mt-1">{formData.mrd}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1603,6 +1622,7 @@ Medford Hospital
                     amountType: "deposit", // Set amountType to 'deposit' by default for new appointments
                   }] : null,
                   serviceDetails: null, // As per your logic, this is null by default
+                  mrd: formData.mrd || null,
                 }}
                 genderOptions={genderOptions}
                 admissionSourceOptions={admissionSourceOptions}

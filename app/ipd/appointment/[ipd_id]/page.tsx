@@ -105,6 +105,7 @@ interface IPDFormInput {
   time: string;
   paymentDetails: PaymentDetailItem[] | null;
   serviceDetails: ServiceDetailItem[] | null;
+  mrd?: string | null; // Added new field for MRD
 }
 
 // Supabase structure for fetching
@@ -143,6 +144,9 @@ interface IPDRegistrationSupabaseFetch {
     bed_type: string;
     status: string;
   } | null;
+  discharge_type: string | null;
+  ipd_notes: string | null;
+  mrd: string | null; // Added new field for MRD
 }
 
 // --- End Type Definitions ---
@@ -314,7 +318,7 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
       const { data, error } = await supabase
         .from("ipd_registration")
         .select(
-          `ipd_id,admission_source,admission_type,under_care_of_doctor,payment_detail,bed_id,service_detail,created_at,discharge_date,relative_name,relative_ph_no,relative_address,admission_date,admission_time,uhid,patient_detail(patient_id,name,number,age,gender,address,age_unit,dob),bed_management(id,room_type,bed_number,bed_type,status)`
+          `ipd_id,admission_source,admission_type,under_care_of_doctor,payment_detail,bed_id,service_detail,created_at,discharge_date,relative_name,relative_ph_no,relative_address,admission_date,admission_time,uhid,patient_detail(patient_id,name,number,age,gender,address,age_unit,dob),bed_management(id,room_type,bed_number,bed_type,status),discharge_type,ipd_notes,mrd`
         )
         .eq("ipd_id", id)
         .single<IPDRegistrationSupabaseFetch>()
@@ -349,6 +353,7 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
           time: data.admission_time || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           paymentDetails: data.payment_detail || [],
           serviceDetails: data.service_detail || [],
+          mrd: data.mrd || null, // Set mrd from fetched data
         }));
         setOriginalBedId(data.bed_id); // Store original bed ID for status update logic
       }
@@ -555,6 +560,7 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
             relative_address: formData.relativeAddress,
             admission_date: formData.date,
             admission_time: formData.time,
+            mrd: formData.mrd || null, // Save mrd
           })
           .eq("ipd_id", formData.ipd_id);
         if (ipdError) throw ipdError;
@@ -887,6 +893,16 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
                     />
                   </div>
                 )}
+                <div className="space-y-2">
+                  <Label htmlFor="mrd">MRD Number (Optional)</Label>
+                  <Input
+                    id="mrd"
+                    placeholder="Enter MRD number"
+                    value={formData.mrd || ''}
+                    onChange={(e) => setFormData((prev: IPDFormInput) => ({ ...prev, mrd: e.target.value }))}
+                    className="placeholder-gray-400"
+                  />
+                </div>
 
                 <div className="space-y-2">
                   <Label>Admission Type</Label>
@@ -1251,6 +1267,12 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
                       {beds.find((b) => b.id === (formData.bed !== null ? formData.bed : undefined))?.bed_type}
                     </p>
                   </div>
+                  {formData.mrd && (
+                    <div className="bg-white p-3 rounded-md shadow-sm">
+                      <span className="font-medium text-gray-500">MRD Number:</span>
+                      <p className="font-semibold mt-1">{formData.mrd}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1296,6 +1318,7 @@ const IPDAppointmentEditPage = ({ params }: IPDAppointmentEditPageProps) => {
                       }))
                     : null,
                   serviceDetails: formData.serviceDetails,
+                  mrd: formData.mrd || null,
                 }}
                 genderOptions={genderOptions}
                 admissionSourceOptions={admissionSourceOptions}

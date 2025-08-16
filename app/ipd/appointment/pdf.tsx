@@ -69,6 +69,7 @@ interface IPDFormInputForPDF { // Renamed for clarity that this is the data shap
   ipd_id?: number; // Optional
   paymentDetails: PaymentDetailItem[] | null;
   serviceDetails: ServiceDetailItem[] | null;
+  mrd?: string | null; // Added new field for MRD
 }
 
 interface IPDSignaturePDFProps {
@@ -201,6 +202,10 @@ export default function IPDSignaturePDF({
 
     addField("Address", data.address || "NA")
     addField("Number", data.phone || "NA")
+
+    if (data.mrd) {
+      addField("MRD Number", data.mrd);
+    }
 
     /* ---------- Admission ---------- */
     addSection("Admission Details")
@@ -376,6 +381,10 @@ export default function IPDSignaturePDF({
 
     addFieldEN("Address", data.address || "NA")
     addFieldEN("Number", data.phone || "NA")
+
+    if (data.mrd) {
+      addFieldEN("MRD Number", data.mrd);
+    }
 
     /* ---------- Admission details ---------- */
     addSectionHI("भर्ती विवरण / ADMISSION DETAILS")
