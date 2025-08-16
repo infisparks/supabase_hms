@@ -693,7 +693,7 @@ const DPRPage = () => {
                 <strong>Date:</strong> {format(parseISO(selectedDate), 'EEEE, MMMM dd, yyyy')}
               </span>
               <span className="muted">Comprehensive Operations Overview</span>
-              <span className="chip">v2.0 Professional</span>
+              <span className="chip">Inficare RMS Professional</span>
             </div>
           </div>
         </div>
