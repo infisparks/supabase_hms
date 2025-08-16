@@ -7,19 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import {
-  Calendar,
-  Stethoscope,
-  TrendingUp,
-  AlertTriangle,
-  Clock,
-  UserCheck,
-  Building2,
-  Printer,
-  Heart,
-  X,
-  Activity,
-} from 'lucide-react'
+import { Calendar, Stethoscope, TrendingUp, AlertTriangle, Clock, UserCheck, Building2, Printer, Heart, X, Activity } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { format, parseISO } from 'date-fns'
 
@@ -437,274 +425,504 @@ const DPRPage = () => {
   }, [selectedDate, fetchDPRData]);
 
   const generatePrintContent = useCallback(() => {
+    const org = (typeof window !== 'undefined' ? window.location.origin : '') || '';
+    const letterheadURL = `${org}/letterhead.png`;
+    const logoURL = `${org}/logo.png`; // optional, place /public/logo.png
+  
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const now = new Date();
+    const generatedAt = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  
     return (
-      <div className="pdf-content-wrapper" style={{
-        fontFamily: 'Arial, sans-serif',
-        // Overall padding reduced significantly to maximize content area
-        padding: '10px 15px', // Top/Bottom, Left/Right
-        color: '#333',
-        width: '210mm',      // A4 width
-        height: '296mm',     // Slightly less than full A4 height to avoid overflow rounding
-        boxSizing: 'border-box',
-        position: 'relative',
-        backgroundImage: `url(${typeof window !== 'undefined' ? window.location.origin : ''}/letterhead.png)`,
-        backgroundRepeat: 'no-repeat',
-        backgroundPosition: 'center center',
-        backgroundSize: '210mm 297mm', // Exact A4 dimensions
-        fontSize: '11px', // Base font size for report, can be adjusted further
-        overflow: 'hidden', // Prevent content spill that can trigger extra pages
-      }}>
+      <div
+        className="pdf-content-wrapper"
+        style={{
+          fontFamily: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+          // <CHANGE> Reduced padding for more content density
+          padding: '30mm 10mm 6mm 10mm', // Increased top padding from 25mm to 30mm
+          color: '#111827',
+          width: '210mm',
+          height: '297mm',
+          boxSizing: 'border-box',
+          position: 'relative',
+          backgroundImage: `url(${letterheadURL})`,
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'center center',
+          backgroundSize: '210mm 297mm',
+          // <CHANGE> Increased base font size from 11px to 13px
+          fontSize: '13px',
+          lineHeight: 1.4,
+          overflow: 'hidden',
+        }}
+      >
         <style>
           {`
-            @page {
-              size: A4;
-              margin: 0; /* Remove default page margins */
-            }
-            body {
-              margin: 0;
-              padding: 0;
-            }
-
-            /* Make card and table backgrounds transparent */
-            .kpi-card, .ot-card, .bed-table, .bed-table th, .bed-table td, .ot-item, .alert-item {
-              background-color: transparent !important; /* Override all default backgrounds */
-              border-color: #d1d5db; /* Keep borders visible if desired */
-            }
-
-            /* Adjust internal padding/margins for content to sit well on letterhead */
+            @page { size: A4; margin: 0; }
+            * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  
+            .muted { color: #6b7280; }
+            .subtle { color: #374151; }
+            .accent { color: #2563eb; }
+            .accent-green { color: #059669; }
+            .accent-red { color: #dc2626; }
+            .accent-amber { color: #b45309; }
+            .accent-indigo { color: #4f46e5; }
+  
             .header {
-              text-align: center;
-              margin-bottom: 15px; /* Reduced margin */
-              padding-top: 150px; /* Increased top padding to prevent cutting off */
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              margin-bottom: 4mm;
+              padding-top: 15mm;
             }
-            .title {
-              font-size: 22px; /* Smaller title */
-              font-weight: bold;
-              margin: 10px 0;
-              text-align: center;
-              color: #2563eb;
+  
+            .logo {
+              width: 16mm;
+              height: 16mm;
+              object-fit: contain;
+              border-radius: 3mm;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+              margin-bottom: 2mm;
             }
-            .date-info {
-              text-align: center;
-              margin: 5px 0 15px 0; /* Reduced margin */
+  
+            .title-wrap {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              row-gap: 1.5mm;
+            }
+  
+            .report-title {
+              font-size: 20px;
+              font-weight: 900;
+              letter-spacing: 0.3px;
+              text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            }
+  
+            .meta-line {
+              display: flex;
+              gap: 6mm;
+              flex-wrap: wrap;
               font-size: 12px;
-              color: #6b7280;
               font-weight: 500;
+              justify-content: center;
             }
-
+  
+            .chip {
+              display: inline-block;
+              padding: 3px 8px;
+              border: 1px solid #e5e7eb;
+              border-radius: 8px;
+              background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(37, 99, 235, 0.04));
+              color: #1f2937;
+              font-weight: 600;
+              font-size: 11px;
+            }
+  
+            .divider {
+              height: 2px;
+              background: linear-gradient(to right, #2563eb, #3b82f6 40%, rgba(59, 130, 246, 0.3));
+              margin: 2mm 0 3mm;
+              border-radius: 1px;
+            }
+  
             .kpi-grid {
               display: grid;
-              grid-template-columns: repeat(8, 1fr);
-              gap: 6px; /* Further reduced gap for 7 columns */
-              margin: 15px 0; /* Reduced margin */
+              grid-template-columns: repeat(4, 1fr);
+              gap: 3mm;
+              margin: 0 0 4mm;
             }
-            .kpi-card {
+            .kpi {
               border: 1px solid #e5e7eb;
-              padding: 8px; /* Reduced padding */
-              text-align: center;
-              border-radius: 6px; /* Slightly smaller border radius */
-              background: #f9fafb;
-            }
-            .kpi-value {
-              font-size: 24px; /* Slightly smaller for 7 columns */
-              font-weight: bold;
-              color: #2563eb;
-              margin-bottom: 3px; /* Reduced margin */
-            }
-            .kpi-label {
-              font-size: 10px; /* Smaller KPI label */
-              color: #6b7280;
-              font-weight: 500;
-            }
-
-            .ot-card {
-              border: 1px solid #e5e7eb;
-              padding: 8px; /* Reduced padding */
-              text-align: center;
               border-radius: 6px;
-              margin: 15px 0; /* Reduced margin */
+              padding: 3mm 2.5mm;
+              background: linear-gradient(135deg, rgba(249, 250, 251, 0.9), rgba(255, 255, 255, 0.8));
+              box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            }
+            .kpi .val {
+              font-size: 22px;
+              font-weight: 900;
+              margin-bottom: 1mm;
+              color: #111827;
+            }
+            .kpi .label {
+              font-size: 11px;
+              color: #6b7280;
+              font-weight: 700;
+              letter-spacing: 0.3px;
+              text-transform: uppercase;
+            }
+  
+            .opd-breakdown {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 1.5mm;
+              margin-top: 2mm;
+            }
+            .opd-item { text-align: center; }
+            .opd-item .v { font-size: 13px; font-weight: 800; }
+            .opd-item .t { font-size: 10px; color: #6b7280; margin-top: 0.5mm; font-weight: 600; }
+  
+            .section-title {
+              font-size: 15px;
+              font-weight: 900;
+              color: #1f2937;
+              letter-spacing: 0.3px;
+              text-transform: uppercase;
+              margin-bottom: 2mm;
+              padding-bottom: 1mm;
+              border-bottom: 2px solid #e5e7eb;
+            }
+            .section {
+              border: 1px solid #e5e7eb;
+              border-radius: 6px;
+              padding: 3mm;
+              background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(249, 250, 251, 0.8));
+              margin-bottom: 3mm;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             }
             .ot-grid {
               display: grid;
               grid-template-columns: repeat(3, 1fr);
-              gap: 6px; /* Reduced gap */
-              margin-top: 8px; /* Reduced margin */
+              gap: 2.5mm;
+              margin-top: 2mm;
             }
-            .ot-item {
-              padding: 4px; /* Reduced padding */
-              border: 1px solid #d1d5db;
-              border-radius: 4px; /* Smaller border radius */
-            }
-            .ot-value {
-              font-size: 18px; /* Smaller OT value */
-              font-weight: bold;
-              color: #059669;
-            }
-            .ot-label {
-              font-size: 9px; /* Smaller OT label */
-              color: #6b7280;
-              margin-top: 2px;
-            }
-
-            .bed-section {
-              margin-top: 15px; /* Reduced margin */
-            }
-            .section-title {
-              font-size: 15px; /* Smaller section title */
-              font-weight: bold;
+            .ot {
+              border: 1px solid #e5e7eb;
+              border-radius: 6px;
+              padding: 2.5mm;
               text-align: center;
-              margin: 15px 0 8px 0; /* Reduced margin */
-              color: #374151;
+              background: linear-gradient(135deg, rgba(5, 150, 105, 0.05), rgba(5, 150, 105, 0.02));
             }
-            .bed-table {
+            .ot .val {
+              font-size: 20px;
+              font-weight: 900;
+              color: #065f46;
+            }
+            .ot .t {
+              font-size: 11px; 
+              color: #6b7280; 
+              margin-top: 1mm;
+              font-weight: 600;
+              text-transform: uppercase;
+              letter-spacing: 0.2px;
+            }
+  
+            .table-wrap { margin-top: 2mm; }
+            table.bed {
               width: 100%;
               border-collapse: collapse;
-              margin-top: 8px; /* Reduced margin */
+              font-size: 12px;
               border: 1px solid #e5e7eb;
-              font-size: 10px; /* Smaller table font size */
+              border-radius: 6px;
+              overflow: hidden;
             }
-            .bed-table th, .bed-table td {
-              border: 1px solid #d1d5db;
-              padding: 6px; /* Significantly reduced padding */
+            .bed th, .bed td {
+              border: 1px solid #e5e7eb;
+              padding: 1mm 2.5mm; /* Further decreased padding */
               text-align: center;
             }
-            .bed-table th {
-              font-weight: bold;
+            .bed th {
+              font-weight: 800;
+              background: linear-gradient(135deg, rgba(243, 244, 246, 0.9), rgba(249, 250, 251, 0.8));
               color: #374151;
+              font-size: 12px;
+              text-transform: uppercase;
+              letter-spacing: 0.2px;
             }
-            /* Specific styles for the OPD breakdown in PDF */
-            .opd-breakdown-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 5px;
-              margin-top: 5px;
+            .bed tr.highlight td {
+              background: rgba(249, 250, 251, 0.5);
             }
-            .opd-breakdown-item {
-                text-align: center;
+            .bed td {
+              font-weight: 600;
             }
-            .opd-breakdown-value {
-                font-size: 12px;
-                font-weight: bold;
+  
+            .footer {
+              position: absolute;
+              left: 10mm;
+              right: 10mm;
+              bottom: 6mm;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              font-size: 11px;
+              color: #6b7280;
+              font-weight: 500;
+              padding-top: 2mm;
+              border-top: 1px solid #e5e7eb;
             }
-            .opd-breakdown-label {
-                font-size: 9px;
-                color: #6b7280;
-            }
+            .footer strong { color: #374151; font-weight: 700; }
 
+            /* <CHANGE> Added secondary KPI grid for better content organization */
+            .secondary-kpi-grid {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 3mm;
+              margin: 0 0 4mm;
+            }
+            .secondary-kpi {
+              border: 1px solid #e5e7eb;
+              border-radius: 6px;
+              padding: 2.5mm;
+              background: linear-gradient(135deg, rgba(239, 246, 255, 0.8), rgba(255, 255, 255, 0.6));
+              text-align: center;
+            }
+            .secondary-kpi .val {
+              font-size: 18px;
+              font-weight: 800;
+              margin-bottom: 0.5mm;
+              color: #2563eb;
+            }
+            .secondary-kpi .label {
+              font-size: 10px;
+              color: #6b7280;
+              font-weight: 600;
+              text-transform: uppercase;
+              letter-spacing: 0.2px;
+            }
           `}
         </style>
+  
+        {/* HEADER */}
         <div className="header">
-          <div className="title">Daily Performance Report</div>
-          <div className="date-info">Date: {format(parseISO(selectedDate), 'EEEE, MMMM dd, yyyy')}</div>
+          <img className="logo" src={logoURL || "/placeholder.svg"} alt="Logo" onError={(e) => ((e.target as HTMLImageElement).style.display='none')} />
+          <div className="title-wrap">
+            <div className="report-title accent">Daily Performance Report</div>
+            <div className="meta-line">
+              <span>
+                <strong>Date:</strong> {format(parseISO(selectedDate), 'EEEE, MMMM dd, yyyy')}
+              </span>
+              <span className="muted">Comprehensive Operations Overview</span>
+              <span className="chip">v2.0 Professional</span>
+            </div>
+          </div>
         </div>
-
+  
+        <div className="divider" />
+  
+        {/* <CHANGE> Reorganized KPI grid to be more compact with 4 columns */}
         <div className="kpi-grid">
-          <div className="kpi-card">
-            <div className="kpi-value">{kpiData.totalOPDAppointments}</div>
-            <div className="kpi-label">Total OPD Appointments</div>
-            {/* NEW: OPD Breakdown for PDF */}
-            <div className="opd-breakdown-grid">
-              <div className="opd-breakdown-item">
-                <div className="opd-breakdown-value" style={{ color: '#dc2626' }}>{kpiData.totalCasualtyOPD}</div>
-                <div className="opd-breakdown-label">Casualty</div>
+          <div className="kpi">
+            <div className="val">{kpiData.totalOPDAppointments}</div>
+            <div className="label">OPD Appointments</div>
+            <div className="opd-breakdown">
+              <div className="opd-item">
+                <div className="v accent-red">{kpiData.totalCasualtyOPD}</div>
+                <div className="t">Casualty</div>
               </div>
-              <div className="opd-breakdown-item">
-                <div className="opd-breakdown-value" style={{ color: '#4f46e5' }}>{kpiData.totalConsultantOPD}</div>
-                <div className="opd-breakdown-label">Consultant</div>
+              <div className="opd-item">
+                <div className="v accent-indigo">{kpiData.totalConsultantOPD}</div>
+                <div className="t">Consultant</div>
               </div>
-              <div className="opd-breakdown-item">
-                <div className="opd-breakdown-value" style={{ color: '#f59e0b' }}>{kpiData.totalOtherOPD}</div>
-                <div className="opd-breakdown-label">Other</div>
+              <div className="opd-item">
+                <div className="v accent-amber">{kpiData.totalOtherOPD}</div>
+                <div className="t">Other</div>
               </div>
             </div>
           </div>
-          <div className="kpi-card">
-            <div className="kpi-value">{kpiData.totalIPDAdmissions}</div>
-            <div className="kpi-label">Total IPD Admissions</div>
+  
+          <div className="kpi">
+            <div className="val">{kpiData.totalIPDAdmissions}</div>
+            <div className="label">IPD Admissions</div>
           </div>
-          <div className="kpi-card">
-            <div className="kpi-value">{kpiData.totalOTProcedures}</div>
-            <div className="kpi-label">Total OT</div>
+  
+          <div className="kpi">
+            <div className="val">{kpiData.totalOTProcedures}</div>
+            <div className="label">OT Procedures</div>
           </div>
-          <div className="kpi-card">
-            <div className="kpi-value">{kpiData.totalDischarges}</div>
-            <div className="kpi-label">Total Discharges</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-value">{kpiData.totalDeaths}</div>
-            <div className="kpi-label">Total Deaths</div>
-          </div>
-          {/* NEW: X-ray and Dialysis for PDF */}
-          <div className="kpi-card">
-            <div className="kpi-value">{kpiData.totalXray}</div>
-            <div className="kpi-label">Total X-ray</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-value">{kpiData.totalDialysis}</div>
-            <div className="kpi-label">Total Dialysis</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-value">{kpiData.totalPathology}</div>
-            <div className="kpi-label">Total Pathology</div>
+  
+          <div className="kpi">
+            <div className="val">{kpiData.totalDischarges}</div>
+            <div className="label">Discharges</div>
           </div>
         </div>
 
-        <div className="ot-card">
-          <div className="section-title">OT Breakdown</div>
+        {/* <CHANGE> Added secondary KPI row for better content density */}
+        <div className="secondary-kpi-grid">
+          <div className="secondary-kpi">
+            <div className="val">{kpiData.totalDeaths}</div>
+            <div className="label">Deaths</div>
+          </div>
+          <div className="secondary-kpi">
+            <div className="val">{kpiData.totalXray}</div>
+            <div className="label">X-Ray</div>
+          </div>
+          <div className="secondary-kpi">
+            <div className="val">{kpiData.totalDialysis}</div>
+            <div className="label">Dialysis</div>
+          </div>
+          <div className="secondary-kpi">
+            <div className="val">{kpiData.totalPathology}</div>
+            <div className="label">Pathology</div>
+          </div>
+        </div>
+  
+        {/* OT SECTION */}
+        <div className="section">
+          <div className="section-title">Operating Theater Breakdown</div>
           <div className="ot-grid">
-            <div className="ot-item">
-              <div className="ot-value">{kpiData.totalMajorOT}</div>
-              <div className="ot-label">Major OT</div>
+            <div className="ot">
+              <div className="val">{kpiData.totalMajorOT}</div>
+              <div className="t">Major OT</div>
             </div>
-            <div className="ot-item">
-              <div className="ot-value">{kpiData.totalMinorOT}</div>
-              <div className="ot-label">Minor OT</div>
+            <div className="ot">
+              <div className="val">{kpiData.totalMinorOT}</div>
+              <div className="t">Minor OT</div>
             </div>
-            <div className="ot-item">
-              <div className="ot-value">{kpiData.totalOTProcedures}</div>
-              <div className="ot-label">Total OT</div>
+            <div className="ot">
+              <div className="val">{kpiData.totalOTProcedures}</div>
+              <div className="t">Total OT</div>
             </div>
           </div>
         </div>
-
-        
-
-        <div className="bed-section">
-          <div className="section-title">Bed Management Status</div>
-          <table className="bed-table">
-            <thead>
-              <tr>
-                <th>Ward/Type</th>
-                <th>Total Beds</th>
-                <th>Occupied</th>
-                <th>Available</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Conditional rendering: Only render if bedManagement has data to avoid empty table */}
-              {bedManagement.length > 0 ? (
-                bedManagement.map((ward, index) => (
-                  <tr key={index}>
-                    <td>{ward.wardName}</td>
-                    <td>{ward.totalBeds}</td>
-                    <td>{ward.occupiedBeds}</td>
-                    <td>{ward.availableBeds}</td>
-                  </tr>
-                ))
-              ) : (
+  
+        {/* BEDS */}
+        <div className="section">
+          <div className="section-title">Bed Management Overview</div>
+          <div className="table-wrap">
+            <table className="bed">
+              <thead>
                 <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', padding: '10px' }}>No bed data available.</td>
+                  <th>Ward/Department</th>
+                  <th>Total Capacity</th>
+                  <th>Occupied</th>
+                  <th>Available</th>
+                  <th>Occupancy %</th>
+                  <th>Room Status</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {bedManagement.length > 0 ? (
+                  bedManagement.map((ward, idx) => {
+                    const occupancyRate = ward.totalBeds > 0 ? Math.round((ward.occupiedBeds / ward.totalBeds) * 100) : 0;
+                    return (
+                      <tr key={idx} className={idx % 2 === 1 ? 'highlight' : ''}>
+                        <td style={{ textAlign: 'left', fontWeight: 700 }}>{ward.wardName}</td>
+                        <td style={{ fontWeight: 600 }}>{ward.totalBeds}</td>
+                        <td style={{ color: '#059669', fontWeight: 800 }}>{ward.occupiedBeds}</td>
+                        <td style={{ color: '#2563eb', fontWeight: 800 }}>{ward.availableBeds}</td>
+                        <td style={{
+                          color: occupancyRate > 85 ? '#dc2626' : occupancyRate > 70 ? '#b45309' : '#059669',
+                          fontWeight: 800
+                        }}>
+                          {occupancyRate}%
+                        </td>
+                        <td style={{
+                          color: ward.availableBeds > 0 ? '#059669' : '#dc2626',
+                          fontWeight: 800
+                        }}>
+                          {ward.availableBeds > 0 ? 'Available' : 'Full'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '6mm', fontStyle: 'italic' }}>
+                      No bed management data available for this date.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-
-
+  
+        {/* FOOTER */}
+        <div className="footer">
+          <div>Generated: <strong>{generatedAt}</strong></div>
+          <div className="muted">Daily Performance Report • Professional Edition</div>
+          <div className="muted">Operations Department</div>
+        </div>
       </div>
     );
-  }, [selectedDate, kpiData, bedManagement]); // Removed 'alerts' from dependency array
+  }, [selectedDate, kpiData, bedManagement]);
 
+  const handleSendDPRToMerajSir = async () => {
+    if (!html2pdf || !printContentRef.current) {
+      console.warn('html2pdf not loaded or print content not available.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const options = {
+        margin: [0, 0, 0, 0],
+        filename: `Daily_Performance_Report_${format(parseISO(selectedDate), 'yyyy-MM-dd')}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          letterRendering: true,
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all'] },
+      };
+
+      const worker = html2pdf().from(printContentRef.current).set(options).toPdf();
+      const pdf = await worker.get('pdf');
+      const totalPages = pdf.internal.getNumberOfPages();
+      if (totalPages > 1) {
+        pdf.deletePage(totalPages);
+      }
+
+      const pdfBlob = new Blob([pdf.output('blob')], { type: 'application/pdf' });
+
+      // Prepare the caption dynamically
+      const caption = `*Daily Performance Report - ${format(parseISO(selectedDate), 'EEEE, MMMM dd, yyyy')}*
+
+📈 *Key Performance Indicators:*
+- Total OPD Appointments: *${kpiData.totalOPDAppointments}* 
+    Casualty: ${kpiData.totalCasualtyOPD}, 
+    Consultant: ${kpiData.totalConsultantOPD}, 
+    Other: ${kpiData.totalOtherOPD}
+
+- Total IPD Admissions: *${kpiData.totalIPDAdmissions}*
+
+- Total Discharges: *${kpiData.totalDischarges}*
+
+- Total OT Procedures: *${kpiData.totalOTProcedures}* 
+    Major: ${kpiData.totalMajorOT},
+    Minor: ${kpiData.totalMinorOT}
+
+- Total Deaths: *${kpiData.totalDeaths}*
+
+- Total X-ray: *${kpiData.totalXray}*
+
+- Total Dialysis: *${kpiData.totalDialysis}*
+
+- Total Pathology: *${kpiData.totalPathology}*
+
+_Generated automatically from the Inficare Management System._`;
+
+      // Create FormData to send the PDF blob and caption
+      const formData = new FormData();
+      formData.append('pdfFile', pdfBlob, options.filename);
+      formData.append('caption', caption);
+      formData.append('filename', options.filename); // Explicitly add filename
+
+      // Send PDF to a new API route for upload and WhatsApp send
+      const uploadRes = await fetch('/api/send-dpr', {
+        method: 'POST',
+        body: formData, // Send as FormData
+      });
+
+      if (uploadRes.ok) {
+        const result = await uploadRes.json();
+        alert(result.message);
+      } else {
+        const errorData = await uploadRes.json();
+        throw new Error(errorData.message || 'Failed to send DPR via WhatsApp.');
+      }
+    } catch (error) {
+      console.error('Error sending DPR:', error);
+      alert(`Failed to send DPR: ${(error as Error).message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handlePrint = async () => {
     if (printContentRef.current && html2pdf) {
@@ -802,6 +1020,18 @@ const DPRPage = () => {
               <Printer className="h-4 w-4" />
               Print DPR
             </Button>
+            <Button
+              onClick={handleSendDPRToMerajSir}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md flex items-center gap-2 w-full sm:w-auto"
+              disabled={isLoading} // Disable button while loading
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                <path d="M3.478 2.405a8.125 8.125 0 0 1 6.386-.713 12.915 12.915 0 0 1 3.292 1.487c.732.397 1.455.88 2.14 1.442A27.174 27.174 0 0 0 22.5 12c0 2.94-.585 5.75-1.68 8.232a8.15 8.15 0 0 1-2.643-3.63 10.518 10.518 0 0 0-4.636-4.636 8.15 8.15 0 0 1-3.63-2.643C6.349 7.085 4.939 4.75 3.478 2.405ZM18.784 12c.704.227 1.4.48 2.08.756a12.917 12.917 0 0 0-3.3-1.488 8.126 8.126 0 0 1-6.384-.711 10.518 10.518 0 0 0-4.637-4.637 8.15 8.15 0 0 1-2.643-3.63C4.25 4.939 6.585 6.349 9.068 7.451c2.482 1.096 4.755 1.69 7.03 1.69.76 0 1.51-.078 2.246-.226Z" fill="currentColor" />
+                <path fillRule="evenodd" d="M8.25 6.75a3.75 3.75 0 1 1 7.5 0 3.75 3.75 0 0 1-7.5 0ZM15.75 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" clipRule="evenodd" />
+              </svg>
+
+              Send to Meraj Sir
+            </Button>
           </div>
         </div>
 
@@ -821,12 +1051,12 @@ const DPRPage = () => {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-blue-100 bg-blue-50">
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-blue-800">Total OPD Appointments</CardTitle>
               <Calendar className="h-5 w-5 text-blue-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-1 pb-2 px-3">
               <div className="text-3xl font-bold text-blue-900">{kpiData.totalOPDAppointments}</div>
               <p className="text-xs text-blue-600 mt-1">Appointments on {format(parseISO(selectedDate), 'MMM dd')}</p>
               {/* NEW: OPD Breakdown for UI */}
@@ -847,23 +1077,23 @@ const DPRPage = () => {
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-purple-100 bg-purple-50">
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-purple-800">Total IPD Admissions</CardTitle>
               <Building2 className="h-5 w-5 text-purple-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-1 pb-2 px-3">
               <div className="text-3xl font-bold text-purple-900">{kpiData.totalIPDAdmissions}</div>
               <p className="text-xs text-purple-600 mt-1">Admissions on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-green-100 bg-green-50">
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-green-800">Total OT</CardTitle>
               <Stethoscope className="h-5 w-5 text-green-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-1 pb-2 px-3">
               <div className="text-3xl font-bold text-green-900">{kpiData.totalOTProcedures}</div>
               <p className="text-xs text-green-600 mt-1">Procedures on {format(parseISO(selectedDate), 'MMM dd')}</p>
               <div className="grid grid-cols-2 gap-2 mt-2">
@@ -879,59 +1109,59 @@ const DPRPage = () => {
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-emerald-100 bg-emerald-50">
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-emerald-800">Total Discharges</CardTitle>
               <UserCheck className="h-5 w-5 text-emerald-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-1 pb-2 px-3">
               <div className="text-3xl font-bold text-emerald-900">{kpiData.totalDischarges}</div>
               <p className="text-xs text-emerald-600 mt-1">Discharges on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-red-100 bg-red-50">
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-red-800">Total Deaths</CardTitle>
               <Heart className="h-5 w-5 text-red-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-1 pb-2 px-3">
               <div className="text-3xl font-bold text-red-900">{kpiData.totalDeaths}</div>
               <p className="text-xs text-red-600 mt-1">Deaths on {format(parseISO(selectedDate), 'MMM dd')}</p>
             </CardContent>
           </Card>
 
           {/* NEW: X-ray KPI Card */}
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-amber-100 bg-amber-50">
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-amber-800">Total X-ray</CardTitle>
               <X className="h-5 w-5 text-amber-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-1 pb-2 px-3">
               <div className="text-3xl font-bold text-amber-900">{kpiData.totalXray}</div>
               <p className="text-xs text-amber-600 mt-1">X-ray Services</p>
             </CardContent>
           </Card>
 
           {/* NEW: Dialysis KPI Card */}
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-cyan-100 bg-cyan-50">
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-cyan-800">Total Dialysis</CardTitle>
               <Activity className="h-5 w-5 text-cyan-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-1 pb-2 px-3">
               <div className="text-3xl font-bold text-cyan-900">{kpiData.totalDialysis}</div>
               <p className="text-xs text-cyan-600 mt-1">Dialysis Services</p>
             </CardContent>
           </Card>
 
           {/* NEW: Pathology KPI Card */}
-          <Card className="hover:shadow-lg transition-shadow duration-300 ease-in-out border border-rose-100 bg-rose-50">
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-rose-800">Total Pathology</CardTitle>
               <TrendingUp className="h-5 w-5 text-rose-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-1 pb-2 px-3">
               <div className="text-3xl font-bold text-rose-900">{kpiData.totalPathology}</div>
               <p className="text-xs text-rose-600 mt-1">Lab Tests</p>
             </CardContent>
