@@ -140,7 +140,7 @@ const OPDListPage = () => {
       filtered = filtered.filter(
         (appt) =>
           appt.patient_detail?.name.toLowerCase().includes(lowerCaseSearchTerm) ||
-          appt.patient_detail?.number?.includes(lowerCaseSearchTerm) ||
+          String(appt.patient_detail?.number).toLowerCase().includes(lowerCaseSearchTerm) ||
           appt.uhid_from_registration.toLowerCase().includes(lowerCaseSearchTerm) ||
           String(appt.opd_id).toLowerCase().includes(lowerCaseSearchTerm),
       )
