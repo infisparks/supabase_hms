@@ -103,6 +103,7 @@ interface IPDFormInput {
   time: string;
   id?: number; // Optional for updates
   mrd?: string | null; // Added new field for MRD
+  tpa?: boolean; // Added new field for TPA
 }
 
 // --- End Type Definitions ---
@@ -194,6 +195,7 @@ const IPDAppointmentPage = () => {
     date: new Date().toISOString().split("T")[0],
     time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }), // Default to current time (24-hour)
     mrd: null,
+    tpa: false, // Initialize tpa to false
   })
 
   // Effect to automatically set 'through' when paymentMode changes
@@ -709,6 +711,7 @@ const IPDAppointmentPage = () => {
           admission_date: formData.date,
           admission_time: formData.time,
           mrd: formData.mrd || null,
+          tpa: formData.tpa || false, // Save tpa
         })
         .select()
 
@@ -813,6 +816,7 @@ Medford Hospital
       bed: null,
       date: new Date().toISOString().split("T")[0],
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }), // Reset to current time
+      tpa: false, // Reset tpa to false
     })
   }
 
@@ -1202,6 +1206,19 @@ Medford Hospital
                 </div>
 
                 <div className="space-y-2">
+                  <Label>TPA (Third Party Administrator)</Label>
+                  <SearchableSelect
+                    options={[
+                      { value: "true", label: "Yes" },
+                      { value: "false", label: "No" },
+                    ]}
+                    value={String(formData.tpa)}
+                    onValueChange={(value) => setFormData((prev: IPDFormInput) => ({ ...prev, tpa: value === "true" }))}
+                    placeholder="Select TPA option"
+                  />
+                </div>
+
+                <div className="space-y-2">
                   <Label>Admission Type</Label>
                   <SearchableSelect
                     options={admissionTypeOptions}
@@ -1583,6 +1600,12 @@ Medford Hospital
                       <p className="font-semibold mt-1">{formData.mrd}</p>
                     </div>
                   )}
+                  {formData.tpa !== undefined && (
+                    <div className="bg-white p-3 rounded-md shadow-sm">
+                      <span className="font-medium text-gray-500">TPA (Third Party Administrator):</span>
+                      <p className="font-semibold mt-1">{formData.tpa ? "Yes" : "No"}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1623,6 +1646,7 @@ Medford Hospital
                   }] : null,
                   serviceDetails: null, // As per your logic, this is null by default
                   mrd: formData.mrd || null,
+                  tpa: formData.tpa || false, // Pass tpa to PDF
                 }}
                 genderOptions={genderOptions}
                 admissionSourceOptions={admissionSourceOptions}

@@ -79,10 +79,11 @@ interface PaymentDetailItemSupabase {
   createdAt: string
   date: string
   paymentType: string // e.g., "cash", "online"
-  transactionType: "advance" | "refund" | "deposit" | "discount" | "settlement" // Renamed from 'type'
+  transactionType: "advance" | "refund" | "discount" | "settlement" | "deposit" // Renamed from 'type'
   amountType?: "advance" | "deposit" | "settlement" | "refund" | "discount" // New field for clearer categorization
   through?: string // Added 'through' field here
   remark?: string // Optional remark for payment
+  discountGivenBy?: string | null; // New field for who gave the discount
 }
 
 interface ServiceDetailItemSupabase {
@@ -146,6 +147,7 @@ export interface BillingRecord {
   doctor?: string | null
   billNumber?: number | null // <-- Correct type
   ipdNotes?: string | null // Add ipdNotes to BillingRecord
+  discountGivenBy?: string | null; // Add discountGivenBy to BillingRecord
 }
 
 // MasterServiceOption - Now without is_consultant and doctor_id (as they are removed from DB)
@@ -174,6 +176,8 @@ interface PaymentForm {
 
 interface DiscountForm {
   discountAmount: number
+  discountGivenBy?: string | null; // New field for who gave the discount
+  otherDiscountGivenBy?: string | null; // New field for custom discount giver name
 }
 
 interface DoctorVisitForm {
@@ -229,6 +233,16 @@ const discountSchema = yup
       .typeError("Discount must be a number")
       .min(0, "Discount cannot be negative")
       .required("Discount is required"),
+    discountGivenBy: yup.string().nullable().when("discountAmount", {
+      is: (amount: number) => amount > 0,
+      then: (schema) => schema.required("Please select who gave the discount"),
+      otherwise: (schema) => schema.notRequired().nullable(),
+    }),
+    otherDiscountGivenBy: yup.string().nullable().when("discountGivenBy", {
+      is: "Other",
+      then: (schema) => schema.required("Please enter the name of the person"),
+      otherwise: (schema) => schema.notRequired().nullable(),
+    }),
   })
   .required()
 
@@ -320,7 +334,7 @@ export default function BillingPage() {
     watch: watchDiscount,
   } = useForm<DiscountForm>({
     resolver: yupResolver(discountSchema),
-    defaultValues: { discountAmount: 0 },
+    defaultValues: { discountAmount: 0, discountGivenBy: "Self", otherDiscountGivenBy: null },
   })
 
   const {
@@ -404,6 +418,8 @@ export default function BillingPage() {
         }
       })
 
+      const discountGivenByFromPayments = payments.find(p => p.amountType === "discount")?.discountGivenBy || null;
+
       const processedRecord: BillingRecord = {
         ipdId: String(data.ipd_id),
         uhid: data.uhid,
@@ -432,6 +448,7 @@ export default function BillingPage() {
         doctor: data.under_care_of_doctor || null, // This is a string (doctor's name) from DB
         billNumber: data.billno ?? null, // <-- Add this line
         ipdNotes: data.ipd_notes || null, // Add ipdNotes to BillingRecord
+        discountGivenBy: discountGivenByFromPayments, // Assign fetched discountGivenBy
       }
       setSelectedRecord(processedRecord)
       console.log("setSelectedRecord called with:", processedRecord)
@@ -825,6 +842,7 @@ export default function BillingPage() {
         amountType: "discount", // Explicitly set amountType for discount
         date: isoDate,
         createdAt: isoDate,
+        discountGivenBy: formData.discountGivenBy === "Other" ? formData.otherDiscountGivenBy : formData.discountGivenBy, // Save who gave the discount
       }
 
       const updatedPayments = [...paymentsWithoutPreviousDiscounts, newDiscountEntry]
@@ -859,11 +877,17 @@ export default function BillingPage() {
               payments: updatedPayments,
               totalDeposit: updatedTotalDeposit,
               discount: updatedTotalDiscount,
+              discountGivenBy: formData.discountGivenBy === "Other" ? formData.otherDiscountGivenBy : formData.discountGivenBy,
             }
           : null,
       )
       setDiscountUpdated(true)
       setTimeout(() => setIsDiscountModalOpen(false), 1000)
+      if (formData.discountGivenBy === "Other") {
+        resetDiscount({ discountGivenBy: "Self", otherDiscountGivenBy: null }); // Clear custom name after saving
+      } else {
+        resetDiscount({ discountGivenBy: "Self", otherDiscountGivenBy: null });
+      }
     } catch (error) {
       console.error("Error applying discount:", error)
       toast.error("Failed to apply discount. Please try again.")
@@ -1213,6 +1237,11 @@ export default function BillingPage() {
                             <Tag size={14} className="mr-1" /> Discount ({discountPercentage}%):
                           </span>
                           <span className="font-medium">-₹{discountVal.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {discountVal > 0 && selectedRecord.discountGivenBy && (
+                        <div className="flex justify-between text-gray-600 text-sm italic mt-1">
+                          <span>(Discount given by: {selectedRecord.discountGivenBy})</span>
                         </div>
                       )}
                       <div className="border-t border-teal-200 pt-2 mt-2">
@@ -1880,6 +1909,11 @@ export default function BillingPage() {
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Date
                           </th>
+                          {selectedRecord.payments.some(p => p.amountType === "discount" && p.discountGivenBy) && (
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Given By
+                            </th>
+                          )}
                           <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Action
                           </th>
@@ -1900,6 +1934,9 @@ export default function BillingPage() {
                             <td className="px-4 py-3 text-sm text-gray-500">
                               {new Date(payment.date).toLocaleString()}
                             </td>
+                            {payment.amountType === "discount" && payment.discountGivenBy && (
+                              <td className="px-4 py-3 text-sm text-gray-900">{payment.discountGivenBy}</td>
+                            )}
                             <td className="px-4 py-3 text-sm text-center">
                               <button
                                 onClick={() =>
@@ -2006,6 +2043,53 @@ export default function BillingPage() {
                         <p className="text-red-500 text-xs mt-1">{errorsDiscount.discountAmount.message}</p>
                       )}
                     </div>
+
+                    {/* New field for who gave the discount */}        
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Discount Given By</label>
+                      <select
+                        {...registerDiscount("discountGivenBy")}
+                        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                          errorsDiscount.discountGivenBy ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      >
+                        <option value="">Select</option>
+                        <option value="Self">Self</option>
+                        <option value="Meraj Sir">Meraj Sir</option>
+                        <option value="Farid Sir">Farid Sir</option>
+                        <option value="Other">Other</option>
+                      </select>
+                      {errorsDiscount.discountGivenBy && (
+                        <p className="text-red-500 text-xs mt-1">{errorsDiscount.discountGivenBy.message}</p>
+                      )}
+                    </div>
+
+                    {/* Conditional input for "Other" */}          
+                    {watchDiscount("discountGivenBy") === "Other" && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Other Person's Name</label>
+                          <input
+                            type="text"
+                            {...registerDiscount("otherDiscountGivenBy")}
+                            placeholder="Enter name"
+                            className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                              errorsDiscount.otherDiscountGivenBy ? "border-red-500" : "border-gray-300"
+                            } transition duration-200`}
+                          />
+                          {errorsDiscount.otherDiscountGivenBy && watchDiscount("discountGivenBy") === "Other" && (
+                            <p className="text-red-500 text-xs mt-1">{errorsDiscount.otherDiscountGivenBy.message}</p>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+
                     {watchDiscount("discountAmount") > 0 && hospitalServiceTotal + consultantChargeTotal > 0 && (
                       <motion.div
                         initial={{ opacity: 0, y: 10 }}

@@ -31,6 +31,8 @@ import {
   FileText,
   CreditCard,
   UserCheck,
+  Heart,
+  X,
 } from "lucide-react"
 
 // Shadcn/ui components
@@ -143,6 +145,7 @@ interface IPDRegistrationSupabase {
   bed_management?: { room_type: string }[] | null
   patient_detail?: PatientDetailFromSupabase[] | null
   ipd_notes?: string | null;
+  tpa?: boolean; // New field for TPA status
 }
 
 // OT Details (from Supabase `ot_details` table)
@@ -160,6 +163,7 @@ interface OTDetailsSupabase {
   baby_birth_date: string | null; // New field
   baby_birth_weight: number | null; // New field
   baby_birth_gender: "Male" | "Female" | "Other" | null; // New field
+  location_type?: string; // New field to differentiate OT vs Labour Room
 }
 
 // Combined types for display in tables/modals
@@ -208,6 +212,7 @@ interface IPDAppointmentDisplay {
   created_at: string // original ISO string from DB
   bed_id: number | null
   ipd_notes?: string | null;
+  tpa?: boolean; // New field for TPA status
 }
 
 interface OTAppointmentDisplay {
@@ -229,6 +234,7 @@ interface OTAppointmentDisplay {
   baby_birth_date: string | null; // New field
   baby_birth_weight: number | null; // New field
   baby_birth_gender: "Male" | "Female" | "Other" | null; // New field
+  location_type?: string; // New field for OT location type
 }
 
 type CombinedAppointment = OPDAppointmentDisplay | IPDAppointmentDisplay | OTAppointmentDisplay
@@ -388,6 +394,7 @@ const DashboardPage: React.FC = () => {
   const [patientAppointmentsModalOpen, setPatientAppointmentsModalOpen] = useState<boolean>(false)
   const [patientAppointmentsLoading, setPatientAppointmentsLoading] = useState<boolean>(false)
   const [patientAllAppointments, setPatientAllAppointments] = useState<CombinedAppointment[]>([])
+  const [babyBirthsData, setBabyBirthsData] = useState<OTDetailsSupabase[]>([]); // New state for baby births
 
   // Data download size tracking (conceptual for Supabase, as actual bytes are harder to track)
   const [totalDownloadedBytes, setTotalDownloadedBytes] = useState(0)
@@ -402,6 +409,10 @@ const DashboardPage: React.FC = () => {
     online_netbanking_total: number;
     online_cheque_total: number;
   } | null>(null);
+  const [totalPathologyCount, setTotalPathologyCount] = useState<number>(0);
+  const [totalDialysisCount, setTotalDialysisCount] = useState<number>(0);
+  const [totalXrayCount, setTotalXrayCount] = useState<number>(0);
+  const [totalDischarges, setTotalDischarges] = useState<number>(0);
 
   // Compute current date range for the dashboard display and the query
   const currentDateRange = useMemo(() => {
@@ -697,7 +708,8 @@ const DashboardPage: React.FC = () => {
               service_detail,
               created_at,
               bed_id,
-              ipd_notes
+              ipd_notes,
+              tpa
             `);
 
           // Always filter IPD by `created_at`
@@ -777,6 +789,7 @@ const DashboardPage: React.FC = () => {
               admission_date: format(createdAtDate, "yyyy-MM-dd"), // Use created_at for admission_date
               admission_time: format(createdAtDate, "HH:mm"), // Use created_at for admission_time
               ipd_notes: ipdRecord.ipd_notes || null,
+              tpa: ipdRecord.tpa,
             }
           })
         );
@@ -789,7 +802,7 @@ const DashboardPage: React.FC = () => {
             .from("ot_details")
             .select(
               `
-                id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at, has_baby_birth, baby_birth_date, baby_birth_weight, baby_birth_gender
+                id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at, has_baby_birth, baby_birth_date, baby_birth_weight, baby_birth_gender, location_type
               `,
             )
             .order("created_at", { ascending: false })
@@ -814,6 +827,20 @@ const DashboardPage: React.FC = () => {
           if (error) throw error;
           otData = data;
         }
+
+        // Fetch baby births data specifically (similar to DPR)
+        let babyBirthsRecords: OTDetailsSupabase[] | null = [];
+        if (!filters.showOnlyOpd && !filters.showOnlyIpd) {
+          const { data, error } = await supabase
+            .from('ot_details')
+            .select(`id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at, has_baby_birth, baby_birth_date, baby_birth_weight, baby_birth_gender, location_type`)
+            .eq('has_baby_birth', true)
+            .gte('created_at', start)
+            .lte('created_at', end);
+          if (error) throw error;
+          babyBirthsRecords = data;
+        }
+        setBabyBirthsData(babyBirthsRecords || []);
 
         // Debug logging for OT results
         if (filters.filterType === 'today') {
@@ -855,14 +882,105 @@ const DashboardPage: React.FC = () => {
               baby_birth_date: otRecord.baby_birth_date,
               baby_birth_weight: otRecord.baby_birth_weight,
               baby_birth_gender: otRecord.baby_birth_gender,
+              location_type: otRecord.location_type,
             }
           })
         );
         setOtAppointments(mappedOt)
+        // Debugging for baby births location type
+        mappedOt.filter(ot => ot.has_baby_birth).forEach(ot => {
+          console.log(`Baby Birth OT ID: ${ot.id}, Location Type: ${ot.location_type}, Has Baby Birth: ${ot.has_baby_birth}`);
+        });
 
         setTotalDownloadedBytes(
           JSON.stringify(mappedOpd).length + JSON.stringify(mappedIpd).length + JSON.stringify(mappedOt).length,
         )
+        // Fetch Pathology count
+        try {
+          const res = await fetch('/api/lab/pathology-count', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: currentDateRange.displayStart })
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json && typeof json.count === 'number') {
+              setTotalPathologyCount(json.count);
+            }
+          } else {
+            console.warn('Failed to fetch pathology count for dashboard');
+            setTotalPathologyCount(0);
+          }
+        } catch (e) {
+          console.error('Error fetching pathology count for dashboard', e);
+          setTotalPathologyCount(0);
+        }
+
+        // Fetch X-ray count
+        try {
+          const xrayApiDate = format(parseISO(currentDateRange.displayStart), 'dd-MM-yyyy');
+          const hospitalName = process.env.NEXT_PUBLIC_LAB_HOSPITAL_NAME || '';
+
+          if (!process.env.NEXT_PUBLIC_LAB_API_KEY) {
+            console.error("NEXT_PUBLIC_LAB_API_KEY is not set. Skipping X-ray count API call on dashboard.");
+            setTotalXrayCount(0);
+          } else {
+            const res = await fetch('https://labapi.infispark.in/rest/v1/rpc/get_registration_count_xray', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': process.env.NEXT_PUBLIC_LAB_API_KEY,
+                'Authorization': `Bearer ${process.env.NEXT_PUBLIC_LAB_API_KEY}`,
+              },
+              body: JSON.stringify({ p_date: xrayApiDate, p_hospital: hospitalName })
+            });
+  
+            if (res.ok) {
+              const json = await res.json();
+              if (typeof json === 'number') {
+                setTotalXrayCount(json);
+              } else if (json && Array.isArray(json) && json.length > 0 && typeof json[0].count === 'number') {
+                setTotalXrayCount(json[0].count);
+              } else {
+                console.warn('X-ray API response format unexpected on dashboard:', json);
+                setTotalXrayCount(0);
+              }
+            } else {
+              console.warn('Failed to fetch X-ray count from API on dashboard:', res.status, res.statusText);
+              setTotalXrayCount(0);
+            }
+          }
+        } catch (e) {
+          console.error('Error while fetching X-ray count on dashboard:', e);
+          setTotalXrayCount(0);
+        }
+        
+        // Calculate Total Dialysis and other service types from OPD appointments
+        let dialysisCount = 0;
+        mappedOpd.forEach(opd => {
+          if (opd.service_info) {
+            opd.service_info.forEach(service => {
+              if (service.type?.toLowerCase() === 'casualty' && service.service?.toLowerCase().includes('dialysis')) {
+                dialysisCount++;
+              }
+            });
+          }
+        });
+        setTotalDialysisCount(dialysisCount);
+
+        // Fetch Discharges
+        try {
+          const { data: dischargeData, error: dischargeError } = await supabase
+            .from('discharge_summaries')
+            .select('id') // Only need to count them
+            .gte('last_updated', start).lte('last_updated', end);
+          
+          if (dischargeError) throw dischargeError;
+          setTotalDischarges(dischargeData?.length || 0);
+        } catch (e) {
+          console.error('Error fetching discharge summaries:', e);
+          setTotalDischarges(0);
+        }
       } catch (err) {
         console.error("Error fetching data for date range:", err)
         toast.error("Failed to load data for the selected period.")
@@ -932,14 +1050,23 @@ const DashboardPage: React.FC = () => {
       totalIpdAmount: netIpdContribution, // This is now net deposits after refunds (deposits - refunds)
       overallIpdRefunds: totalIpdRefunds,
       totalOtCount: otAppointments.length, // This already gives the count of OT procedures
-      totalBabyBirths: otAppointments.filter(ot => ot.has_baby_birth).length, // New: Total baby births
+      totalBabyBirths: babyBirthsData.length, // FIX: Use pre-filtered babyBirthsData for total
+      totalTpaIpd: ipdAppointments.filter(ipd => ipd.tpa).length, // New: Total TPA IPD
+      totalMajorOt: otAppointments.filter(ot => ot.ot_type?.toLowerCase() === 'major').length, // New: Total Major OT
+      totalMinorOt: otAppointments.filter(ot => ot.ot_type?.toLowerCase() === 'minor').length, // New: Total Minor OT
+      totalPathology: totalPathologyCount, // New: Total Pathology
+      totalDialysis: totalDialysisCount, // New: Total Dialysis
+      totalXray: totalXrayCount, // New: Total X-ray
+      totalDischarges: totalDischarges, // New: Total Discharges
+      totalBirthsWithLabor: babyBirthsData.filter(ot => ot.location_type === 'Labour Room').length, // New: Total Births with Labor
+      totalBirthsWithOt: babyBirthsData.filter(ot => ot.location_type === 'OT').length, // New: Total Births with OT
       opdCash,
       opdOnline,
       ipdCash,
       ipdOnline,
       totalRevenue: totalOpdAmt + (ipdTotals?.cash_total || 0) + (ipdTotals?.online_total || 0), // Total revenue includes IPD total collections
     }
-  }, [opdAppointments, ipdAppointments, otAppointments, ipdTotals])
+  }, [opdAppointments, ipdAppointments, otAppointments, ipdTotals, totalPathologyCount, totalDialysisCount, totalXrayCount, totalDischarges, babyBirthsData])
 
   // Combined & filter by date range (search is handled by fetching patientinfo directly)
   const filteredAppointments = useMemo(() => {
@@ -1246,7 +1373,7 @@ const DashboardPage: React.FC = () => {
           .from("ipd_registration")
           .select(
             `
-              ipd_id, uhid, admission_date, admission_time, under_care_of_doctor, payment_detail, service_detail, created_at, bed_id, ipd_notes
+              ipd_id, uhid, admission_date, admission_time, under_care_of_doctor, payment_detail, service_detail, created_at, bed_id, ipd_notes, tpa
             `,
           )
           .eq("uhid", uhid)
@@ -1320,6 +1447,7 @@ const DashboardPage: React.FC = () => {
             admission_date: format(createdAtDate, "yyyy-MM-dd"), // Use created_at for admission_date
             admission_time: format(createdAtDate, "HH:mm"), // Use created_at for admission_time
             ipd_notes: ipdRecord.ipd_notes || null,
+            tpa: ipdRecord.tpa,
           }
         }))
         allPatientApps.push(...mappedIpd)
@@ -1328,7 +1456,7 @@ const DashboardPage: React.FC = () => {
           .from("ot_details")
           .select(
             `
-              id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at, has_baby_birth, baby_birth_date, baby_birth_weight, baby_birth_gender
+              id, ipd_id, uhid, ot_type, ot_notes, ot_date, created_at, has_baby_birth, baby_birth_date, baby_birth_weight, baby_birth_gender, location_type
             `,
           )
           .order("created_at", { ascending: false })
@@ -1368,6 +1496,7 @@ const DashboardPage: React.FC = () => {
             baby_birth_date: otRecord.baby_birth_date,
             baby_birth_weight: otRecord.baby_birth_weight,
             baby_birth_gender: otRecord.baby_birth_gender,
+            location_type: otRecord.location_type,
           }
         }))
         allPatientApps.push(...mappedOt)
@@ -1701,6 +1830,13 @@ const DashboardPage: React.FC = () => {
                         </span>
                       </div>
                     )}
+                    {/* Always show Total TPA IPD, even if 0 */}
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-sm text-gray-600">Total TPA IPD</span>
+                      <span className="text-lg font-semibold text-orange-600">
+                        {statistics.totalTpaIpd}
+                      </span>
+                    </div>
                   </Card>
                   {/* OT */}
                   <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
@@ -1717,25 +1853,123 @@ const DashboardPage: React.FC = () => {
                       <span className="text-sm text-gray-600">Procedures</span>
                       <span className="text-lg font-semibold text-purple-600">{statistics.totalOtCount}</span>
                     </div>
+                    {statistics.totalMajorOt > 0 && (
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-sm text-gray-600">Major OT</span>
+                        <span className="text-lg font-semibold text-purple-600">
+                          {statistics.totalMajorOt}
+                        </span>
+                      </div>
+                    )}
+                    {statistics.totalMinorOt > 0 && (
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-sm text-gray-600">Minor OT</span>
+                        <span className="text-lg font-semibold text-purple-600">
+                          {statistics.totalMinorOt}
+                        </span>
+                      </div>
+                    )}
                   </Card>
                   {/* Baby Births Card */}
-                  {/* {statistics.totalBabyBirths > 0 && (
-                    <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="p-3 bg-gradient-to-r from-teal-100 to-cyan-100 rounded-full shadow-md">
-                          <User className="text-teal-600 h-6 w-6" />
-                        </div>
-                        <div className="text-right">
-                          <p className="text-gray-500 text-sm">Baby Births</p>
-                          <p className="text-2xl font-bold text-gray-900">{statistics.totalBabyBirths}</p>
-                        </div>
+                  <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-gradient-to-r from-pink-100 to-rose-100 rounded-full shadow-md">
+                        <Heart className="text-pink-600 h-6 w-6" />
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-gray-600">Total</span>
-                        <span className="text-lg font-semibold text-teal-600">{statistics.totalBabyBirths}</span>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-sm">Total Births</p>
+                        <p className="text-2xl font-bold text-gray-900">{statistics.totalBabyBirths}</p>
                       </div>
-                    </Card>
-                  )} */}
+                    </div>
+                    {statistics.totalBirthsWithLabor > 0 && (
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-sm text-gray-600">With Labor</span>
+                        <span className="text-lg font-semibold text-pink-600">
+                          {statistics.totalBirthsWithLabor}
+                        </span>
+                      </div>
+                    )}
+                    {statistics.totalBirthsWithOt > 0 && (
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-sm text-gray-600">With OT</span>
+                        <span className="text-lg font-semibold text-pink-600">
+                          {statistics.totalBirthsWithOt}
+                        </span>
+                      </div>
+                    )}
+                  </Card>
+                  {/* Total Discharges Card */}
+                  <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-gradient-to-r from-emerald-100 to-green-100 rounded-full shadow-md">
+                        <UserCheck className="text-emerald-600 h-6 w-6" />
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-sm">Total Discharges</p>
+                        <p className="text-2xl font-bold text-gray-900">{statistics.totalDischarges}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Patients Discharged</span>
+                      <span className="text-lg font-semibold text-emerald-600">
+                        {statistics.totalDischarges}
+                      </span>
+                    </div>
+                  </Card>
+                  {/* Total Pathology Card */}
+                  <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-gradient-to-r from-red-100 to-pink-100 rounded-full shadow-md">
+                        <Activity className="text-red-600 h-6 w-6" />
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-sm">Total Pathology</p>
+                        <p className="text-2xl font-bold text-gray-900">{statistics.totalPathology}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Lab Tests</span>
+                      <span className="text-lg font-semibold text-red-600">
+                        {statistics.totalPathology}
+                      </span>
+                    </div>
+                  </Card>
+                  {/* Total Dialysis Card */}
+                  <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-gradient-to-r from-cyan-100 to-blue-100 rounded-full shadow-md">
+                        <Heart className="text-cyan-600 h-6 w-6" />
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-sm">Total Dialysis</p>
+                        <p className="text-2xl font-bold text-gray-900">{statistics.totalDialysis}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Procedures</span>
+                      <span className="text-lg font-semibold text-cyan-600">
+                        {statistics.totalDialysis}
+                      </span>
+                    </div>
+                  </Card>
+                  {/* Total X-ray Card */}
+                  <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-gradient-to-r from-yellow-100 to-orange-100 rounded-full shadow-md">
+                        <X className="text-yellow-600 h-6 w-6" />
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-sm">Total X-ray</p>
+                        <p className="text-2xl font-bold text-gray-900">{statistics.totalXray}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Scans</span>
+                      <span className="text-lg font-semibold text-yellow-600">
+                        {statistics.totalXray}
+                      </span>
+                    </div>
+                  </Card>
                   {/* Total Revenue */}
                   <Card className="bg-white shadow-lg rounded-xl p-6 border border-gray-100 hover:shadow-xl transition-shadow">
                     <div className="flex items-center justify-between mb-4">

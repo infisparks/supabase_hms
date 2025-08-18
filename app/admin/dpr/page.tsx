@@ -44,6 +44,7 @@ interface KPIData {
   totalBirths: number; // NEW
   birthsInOT: number; // NEW
   birthsInLabourRoom: number; // NEW
+  totalTpaIpd: number; // New field for total TPA IPD
 }
 
 
@@ -88,6 +89,7 @@ const DPRPage = () => {
     totalBirths: 0, // NEW
     birthsInOT: 0, // NEW
     birthsInLabourRoom: 0, // NEW
+    totalTpaIpd: 0, // New field for total TPA IPD
   });
 
   const [bedManagement, setBedManagement] = useState<BedManagement[]>([]);
@@ -133,8 +135,19 @@ const DPRPage = () => {
         throw ipdError;
       }
 
+      // Fetch total TPA IPD registrations
+      const { data: tpaIpdData, error: tpaIpdError } = await supabase
+        .from('ipd_registration')
+        .select('ipd_id')
+        .eq('tpa', true)
+        .gte('created_at', start)
+        .lte('created_at', end);
+      if (tpaIpdError) {
+        console.error("Supabase TPA IPD fetch error:", tpaIpdError);
+        throw tpaIpdError;
+      }
+
       // Fetch all IPD registrations that were active on the selected date for accurate bed management
-      // This means admitted on or before selectedDate, and discharged on or after selectedDate, or not yet discharged
       const { data: activeIpdRegistrations, error: activeIpdError } = await supabase
         .from('ipd_registration')
         .select(`
@@ -308,7 +321,7 @@ const DPRPage = () => {
       let totalXray = 0;
       try {
         const xrayApiDate = format(parseISO(selectedDate), 'dd-MM-yyyy');
-        const hospitalName = process.env.NEXT_PUBLIC_LAB_HOSPITAL_NAME || '';
+        const hospitalName = process.env.NEXT_PUBLIC_LAB_HOSPITAL_NAME || 'Gautami Medford NX Hospital';
 
         if (!process.env.NEXT_PUBLIC_LAB_API_KEY) {
           console.error("NEXT_PUBLIC_LAB_API_KEY is not set. Skipping X-ray count API call.");
@@ -359,6 +372,7 @@ const DPRPage = () => {
         totalBirths: babyBirthsData?.length || 0, // Calculate total births
         birthsInOT: babyBirthsData?.filter(b => b.location_type === 'OT').length || 0, // Calculate births in OT
         birthsInLabourRoom: babyBirthsData?.filter(b => b.location_type === 'Labour Room').length || 0, // Calculate births in Labour Room
+        totalTpaIpd: tpaIpdData?.length || 0, // Calculate total TPA IPD
       });
 
       // --- Bed Management Tab Data Calculation for the selected date ---
@@ -1225,6 +1239,17 @@ _Generated automatically from the Inficare Management System._`;
                   <p className="text-xs text-purple-600">Labour Room</p>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+          {/* NEW: Total TPA IPD Card */}
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-purple-800">Total TPA IPD</CardTitle>
+              <Building2 className="h-5 w-5 text-purple-600" /> {/* Using Building2 for IPD related */}
+            </CardHeader>
+            <CardContent className="pt-1 pb-2 px-3">
+              <div className="text-3xl font-bold text-purple-900">{kpiData.totalTpaIpd}</div>
+              <p className="text-xs text-purple-600 mt-1">TPA Admissions Today</p>
             </CardContent>
           </Card>
         </div>

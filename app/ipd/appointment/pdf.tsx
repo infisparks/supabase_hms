@@ -70,6 +70,7 @@ interface IPDFormInputForPDF { // Renamed for clarity that this is the data shap
   paymentDetails: PaymentDetailItem[] | null;
   serviceDetails: ServiceDetailItem[] | null;
   mrd?: string | null; // Added new field for MRD
+  tpa?: boolean; // Added new field for TPA
 }
 
 interface IPDSignaturePDFProps {
@@ -205,6 +206,10 @@ export default function IPDSignaturePDF({
 
     if (data.mrd) {
       addField("MRD Number", data.mrd);
+    }
+
+    if (data.tpa !== undefined) {
+      addField("TPA (Third Party Administrator)", data.tpa ? "Yes" : "No");
     }
 
     /* ---------- Admission ---------- */
@@ -384,6 +389,10 @@ export default function IPDSignaturePDF({
 
     if (data.mrd) {
       addFieldEN("MRD Number", data.mrd);
+    }
+
+    if (data.tpa !== undefined) {
+      addFieldEN("TPA (Third Party Administrator)", data.tpa ? "Yes" : "No");
     }
 
     /* ---------- Admission details ---------- */
