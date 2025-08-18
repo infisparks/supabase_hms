@@ -67,15 +67,31 @@ interface OtDetailsSupabase {
   ipd_id: number;
   patient_id: number | null;
   uhid: string;
-  ot_type: "Major" | "Minor";
+  ot_type: "Major" | "Minor" | null; // Changed to be nullable
   ot_notes: string | null;
-  ot_date: string; // ISO string
+  ot_date: string | null; // Changed to be nullable
   created_at: string;
   doctor_id: number | null; // Added doctor_id
   has_baby_birth: boolean | null; // New field
   baby_birth_date: string | null; // New field
   baby_birth_weight: number | null; // New field
   baby_birth_gender: "Male" | "Female" | "Other" | null; // New field
+  location_type: "OT" | "Labour Room" | null; // New field for location type
+}
+
+// Interface for the payload sent to Supabase for OT details upsert
+interface OtUpsertPayload {
+  ipd_id: number;
+  uhid: string;
+  ot_type: "Major" | "Minor" | null | undefined;
+  ot_notes: string | null;
+  ot_date: string | null;
+  doctor_id: number | null;
+  has_baby_birth: boolean | null;
+  baby_birth_date: string | null;
+  baby_birth_weight: number | null;
+  baby_birth_gender: "Male" | "Female" | "Other" | null;
+  location_type: "OT" | "Labour Room" | null;
 }
 
 // Interface for Doctor
@@ -88,24 +104,36 @@ interface DoctorSupabase {
 }
 
 interface OTFormInputs {
-  otType: "Major" | "Minor" | undefined;
+  otType: "Major" | "Minor" | undefined | null; // Changed to be nullable
   otNotes: string | null;
-  otDate: string;
+  otDate: string | null; // Changed to be nullable
   otDoctorId: number | undefined; // Added for doctor selection
   hasBabyBirth: boolean; // New field for checkbox
   babyBirthDate: string | null; // New field
   babyBirthWeight: number | null; // New field
   babyBirthGender: "Male" | "Female" | "Other" | undefined; // New field
+  locationType: "OT" | "Labour Room" | undefined; // New field for location type
 }
 
 // --- Validation Schema ---
 const otSchema = yup.object().shape({
+  locationType: yup.string()
+    .oneOf(["OT", "Labour Room"], "Please select either OT or Labour Room")
+    .required("Location Type is required"),
   otType: yup.string()
-    .oneOf(["Major", "Minor"], "Please select either Major OT or Minor OT")
-    .required("OT Type is required"),
+    .nullable()
+    .when("locationType", {
+      is: "OT",
+      then: (schema) => schema.oneOf(["Major", "Minor"], "Please select either Major OT or Minor OT").required("OT Type is required for OT location"),
+      otherwise: (schema) => schema.notRequired(),
+    }),
   otNotes: yup.string().nullable(),
-  otDate: yup.string().required("OT Date is required"),
-  otDoctorId: yup.number().nullable().required("Operating Doctor is required"), // Added validation for doctor
+  otDate: yup.string().nullable().when("locationType", {
+    is: "OT",
+    then: (schema) => schema.required("OT Date is required for OT location"),
+    otherwise: (schema) => schema.notRequired(),
+  }),
+  otDoctorId: yup.number().nullable().required("Operating Doctor is required"), // Required for both OT and Labour Room
   hasBabyBirth: yup.boolean(), // Validation for checkbox
   babyBirthDate: yup.string().nullable().when("hasBabyBirth", {
     is: true,
@@ -166,15 +194,17 @@ export default function OTPage() {
       otDate: getCurrentDate(),
       otDoctorId: undefined, // Default for doctor
       hasBabyBirth: false, // Default for new field
-      babyBirthDate: null,
+      babyBirthDate: null, // This will be set conditionally in useEffect
       babyBirthWeight: null,
       babyBirthGender: undefined,
+      locationType: "OT", // Default for location type
     },
     mode: "onBlur",
   });
 
   const selectedOtType = watch("otType");
   const selectedOtDoctorId = watch("otDoctorId"); // Watch for selected doctor
+  const selectedLocationType = watch("locationType"); // Watch for location type
   const selectedDoctor = useMemo(() => {
     return doctors.find(doc => doc.id === selectedOtDoctorId);
   }, [doctors, selectedOtDoctorId]);
@@ -268,6 +298,7 @@ export default function OTPage() {
           babyBirthDate: otData.baby_birth_date || null,
           babyBirthWeight: otData.baby_birth_weight || null,
           babyBirthGender: otData.baby_birth_gender || undefined,
+          locationType: otData.location_type || "OT", // Set location type from fetched data, default to OT
         });
         // Set search term to selected doctor's name if available for display
         if (doctorsData && otData.doctor_id) {
@@ -286,11 +317,17 @@ export default function OTPage() {
           otDate: getCurrentDate(),
           otDoctorId: undefined, // Reset doctor for new entry
           hasBabyBirth: false, // Reset baby birth fields for new entry
-          babyBirthDate: null,
+          babyBirthDate: null, // This will be set conditionally below
           babyBirthWeight: null,
           babyBirthGender: undefined,
+          locationType: "OT", // Reset location type for new entry
         });
         setSearchTerm(""); // Clear search for new entry
+      }
+
+      // After reset, if hasBabyBirth is checked, set babyBirthDate to current date
+      if (watch("hasBabyBirth")) {
+        setValue("babyBirthDate", getCurrentDate());
       }
 
     } catch (err) {
@@ -299,7 +336,7 @@ export default function OTPage() {
     } finally {
       setLoading(false);
     }
-  }, [ipdId, reset]);
+  }, [ipdId, reset, watch, setValue]);
 
   useEffect(() => {
     if (ipdId) {
@@ -315,9 +352,9 @@ export default function OTPage() {
     }
     setSaving(true);
     try {
-      const otDateISO = formData.otDate + 'T00:00:00.000Z'; // Ensure correct ISO format without timezone issues
+      const otDateISO = formData.otDate ? formData.otDate + 'T00:00:00.000Z' : null; // Ensure correct ISO format without timezone issues, or null
       
-      const payload = {
+      const payload: OtUpsertPayload = {
         ipd_id: patientRecord.ipd_id,
         uhid: patientRecord.uhid,
         ot_type: formData.otType,
@@ -328,7 +365,17 @@ export default function OTPage() {
         baby_birth_date: formData.babyBirthDate || null,
         baby_birth_weight: formData.babyBirthWeight || null,
         baby_birth_gender: formData.babyBirthGender || null,
+        location_type: formData.locationType || null, // Include location_type
       };
+
+      // Conditionally nullify OT related fields if locationType is Labour Room
+      if (payload.location_type === "Labour Room") {
+        payload.ot_type = null;
+        payload.ot_notes = null;
+        payload.ot_date = null;
+        // Do not nullify doctor_id for Labour Room, as it's now required for both
+        // payload.doctor_id = null;
+      }
 
       let error = null;
       if (existingOtRecord) {
@@ -384,6 +431,7 @@ export default function OTPage() {
         babyBirthDate: null,
         babyBirthWeight: null,
         babyBirthGender: undefined,
+        locationType: "OT", // Reset location type for new entry
       });
       setSearchTerm(""); // Clear doctor search term
     } catch (err: any) {
@@ -537,233 +585,316 @@ export default function OTPage() {
                     </h3>
                     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">OT Type <span className="text-red-500">*</span></label>
+                        <label htmlFor="locationType" className="block text-sm font-medium text-gray-700 mb-2">
+                          Location Type <span className="text-red-500">*</span>
+                        </label>
                         <div className="flex flex-wrap gap-4">
                           <button
                             type="button"
-                            onClick={() => handleOtTypeChange("Major")}
+                            onClick={() => setValue("locationType", "OT", { shouldValidate: true })}
                             className={`px-5 py-2 rounded-lg border-2 font-medium transition-all duration-200 ease-in-out
-                              ${selectedOtType === "Major"
+                              ${selectedLocationType === "OT"
                                 ? "bg-teal-600 text-white border-teal-700 shadow-md"
                                 : "bg-white text-gray-700 border-gray-300 hover:border-teal-400 hover:text-teal-600"}
                             `}
                           >
-                            Major OT
+                            Operating Theatre
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleOtTypeChange("Minor")}
+                            onClick={() => setValue("locationType", "Labour Room", { shouldValidate: true })}
                             className={`px-5 py-2 rounded-lg border-2 font-medium transition-all duration-200 ease-in-out
-                              ${selectedOtType === "Minor"
+                              ${selectedLocationType === "Labour Room"
                                 ? "bg-teal-600 text-white border-teal-700 shadow-md"
                                 : "bg-white text-gray-700 border-gray-300 hover:border-teal-400 hover:text-teal-600"}
                             `}
                           >
-                            Minor OT
+                            Labour Room
                           </button>
                         </div>
-                        {errors.otType && (
-                          <p className="text-red-500 text-xs mt-2">{errors.otType.message}</p>
+                        {errors.locationType && (
+                          <p className="text-red-500 text-xs mt-2">{errors.locationType.message}</p>
                         )}
                       </div>
 
-                      <div>
-                        <label htmlFor="otDate" className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                          <CalendarDays size={16} className="mr-2 text-teal-600" />
-                          OT Date <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="date"
-                          id="otDate"
-                          {...register("otDate")}
-                          className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
-                            ${errors.otDate ? "border-red-500" : "border-gray-300"}
-                            focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
-                        />
-                        {errors.otDate && (
-                          <p className="text-red-500 text-xs mt-1">{errors.otDate.message}</p>
-                        )}
-                      </div>
-
-                      {/* Doctor Selection Dropdown with Search */}
-                      <div className="relative">
-                        <label htmlFor="otDoctor" className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                          <User size={16} className="mr-2 text-teal-600" />
-                          Operating Doctor <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          id="otDoctor"
-                          placeholder="Search and select doctor..."
-                          value={searchTerm}
-                          onChange={(e) => {
-                            setSearchTerm(e.target.value);
-                            setIsDoctorDropdownOpen(true); // Open dropdown when typing
-                            setValue("otDoctorId", undefined); // Clear selected doctor when searching
-                          }}
-                          onFocus={() => setIsDoctorDropdownOpen(true)}
-                          onBlur={() => setTimeout(() => setIsDoctorDropdownOpen(false), 200)} // Delay to allow click on options
-                          className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
-                            ${errors.otDoctorId ? "border-red-500" : "border-gray-300"}
-                            focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
-                        />
-                        {selectedDoctor && !isDoctorDropdownOpen && searchTerm === selectedDoctor.dr_name && (
-                            <div className="absolute top-0 right-0 mt-10 mr-3 text-sm text-gray-500 flex items-center">
-                                <Stethoscope size={14} className="mr-1" /> Selected
+                      {selectedLocationType === "OT" && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3 }}
+                          className="space-y-6"
+                        >
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">OT Type <span className="text-red-500">*</span></label>
+                            <div className="flex flex-wrap gap-4">
+                              <button
+                                type="button"
+                                onClick={() => handleOtTypeChange("Major")}
+                                className={`px-5 py-2 rounded-lg border-2 font-medium transition-all duration-200 ease-in-out
+                                  ${selectedOtType === "Major"
+                                    ? "bg-teal-600 text-white border-teal-700 shadow-md"
+                                    : "bg-white text-gray-700 border-gray-300 hover:border-teal-400 hover:text-teal-600"}
+                                `}
+                              >
+                                Major OT
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOtTypeChange("Minor")}
+                                className={`px-5 py-2 rounded-lg border-2 font-medium transition-all duration-200 ease-in-out
+                                  ${selectedOtType === "Minor"
+                                    ? "bg-teal-600 text-white border-teal-700 shadow-md"
+                                    : "bg-white text-gray-700 border-gray-300 hover:border-teal-400 hover:text-teal-600"}
+                                `}
+                              >
+                                Minor OT
+                              </button>
                             </div>
-                        )}
-                        {isDoctorDropdownOpen && filteredDoctors.length > 0 && (
-                          <ul className="absolute z-20 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto mt-1">
-                            {filteredDoctors.map((doctor) => (
-                              <li
-                                key={doctor.id}
-                                className="px-4 py-2 cursor-pointer hover:bg-teal-100 flex justify-between items-center"
-                                onMouseDown={(e) => { // Use onMouseDown to prevent blur event from closing before click
-                                  e.preventDefault();
-                                  setValue("otDoctorId", doctor.id);
-                                  setSearchTerm(doctor.dr_name);
-                                  setIsDoctorDropdownOpen(false);
+                            {errors.otType && (
+                              <p className="text-red-500 text-xs mt-2">{errors.otType.message}</p>
+                            )}
+                          </div>
+
+                          <div>
+                            <label htmlFor="otDate" className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                              <CalendarDays size={16} className="mr-2 text-teal-600" />
+                              OT Date <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="date"
+                              id="otDate"
+                              {...register("otDate")}
+                              className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
+                                ${errors.otDate ? "border-red-500" : "border-gray-300"}
+                                focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                            />
+                            {errors.otDate && (
+                              <p className="text-red-500 text-xs mt-1">{errors.otDate.message}</p>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {/* Doctor Selection Dropdown with Search - always show if locationType is selected */}
+                      {(selectedLocationType === "OT" || selectedLocationType === "Labour Room") && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          <div className="relative">
+                            <label htmlFor="otDoctor" className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                              <User size={16} className="mr-2 text-teal-600" />
+                              Operating Doctor <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              id="otDoctor"
+                              placeholder="Search and select doctor..."
+                              value={searchTerm}
+                              onChange={(e) => {
+                                setSearchTerm(e.target.value);
+                                setIsDoctorDropdownOpen(true); // Open dropdown when typing
+                                setValue("otDoctorId", undefined); // Clear selected doctor when searching
+                              }}
+                              onFocus={() => setIsDoctorDropdownOpen(true)}
+                              onBlur={() => setTimeout(() => setIsDoctorDropdownOpen(false), 200)} // Delay to allow click on options
+                              className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
+                                ${errors.otDoctorId ? "border-red-500" : "border-gray-300"}
+                                focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                            />
+                            {selectedDoctor && !isDoctorDropdownOpen && searchTerm === selectedDoctor.dr_name && (
+                                <div className="absolute top-0 right-0 mt-10 mr-3 text-sm text-gray-500 flex items-center">
+                                    <Stethoscope size={14} className="mr-1" /> Selected
+                                </div>
+                            )}
+                            {isDoctorDropdownOpen && filteredDoctors.length > 0 && (
+                              <ul className="absolute z-20 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto mt-1">
+                                {filteredDoctors.map((doctor) => (
+                                  <li
+                                    key={doctor.id}
+                                    className="px-4 py-2 cursor-pointer hover:bg-teal-100 flex justify-between items-center"
+                                    onMouseDown={(e) => { // Use onMouseDown to prevent blur event from closing before click
+                                      e.preventDefault();
+                                      setValue("otDoctorId", doctor.id);
+                                      setSearchTerm(doctor.dr_name);
+                                      setIsDoctorDropdownOpen(false);
+                                    }}
+                                  >
+                                    <span>{doctor.dr_name} <span className="text-gray-500 text-sm">({doctor.department})</span></span>
+                                    {selectedOtDoctorId === doctor.id && (
+                                      <svg className="h-5 w-5 text-teal-600" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                      </svg>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {errors.otDoctorId && (
+                              <p className="text-red-500 text-xs mt-1">{errors.otDoctorId.message}</p>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {selectedLocationType === "Labour Room" && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3 }}
+                          className="space-y-6"
+                        >
+                          {/* No OT details needed for Labour Room, only baby birth details */}
+                        </motion.div>
+                      )}
+
+                      {(selectedLocationType === "OT" || selectedLocationType === "Labour Room") && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3 }}
+                          className="space-y-6"
+                        >
+                          <div>
+                            <label htmlFor="hasBabyBirth" className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                              <User size={16} className="mr-2 text-teal-600" /> Baby Birth Details (Optional)
+                            </label>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                id="hasBabyBirth"
+                                checked={hasBabyBirthChecked}
+                                {...register("hasBabyBirth")}
+                                onChange={(e) => {
+                                  setHasBabyBirthChecked(e.target.checked);
+                                  setValue("hasBabyBirth", e.target.checked);
+                                  // Reset baby birth fields if unchecked
+                                  if (!e.target.checked) {
+                                    setValue("babyBirthDate", null);
+                                    setValue("babyBirthWeight", null);
+                                    setValue("babyBirthGender", undefined);
+                                  } else {
+                                    // Set current date if checked and no existing date
+                                    setValue("babyBirthDate", getCurrentDate());
+                                  }
                                 }}
-                              >
-                                <span>{doctor.dr_name} <span className="text-gray-500 text-sm">({doctor.department})</span></span>
-                                {selectedOtDoctorId === doctor.id && (
-                                  <svg className="h-5 w-5 text-teal-600" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                  </svg>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        {errors.otDoctorId && (
-                          <p className="text-red-500 text-xs mt-1">{errors.otDoctorId.message}</p>
-                        )}
-                      </div>
-
-                      <div>
-                        <label htmlFor="hasBabyBirth" className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                          <User size={16} className="mr-2 text-teal-600" /> Baby Birth Details (Optional)
-                        </label>
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            id="hasBabyBirth"
-                            checked={hasBabyBirthChecked}
-                            onChange={(e) => {
-                              setHasBabyBirthChecked(e.target.checked);
-                              setValue("hasBabyBirth", e.target.checked);
-                              setValue("babyBirthDate", null);
-                              setValue("babyBirthWeight", null);
-                              setValue("babyBirthGender", undefined);
-                            }}
-                            className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
-                          />
-                          <label htmlFor="hasBabyBirth" className="text-sm text-gray-700">Baby Birth Details</label>
-                        </div>
-                        {hasBabyBirthChecked && (
-                          <>
-                            <div className="mt-4">
-                              <label htmlFor="babyBirthDate" className="block text-sm font-medium text-gray-700 mb-2">
-                                Baby Birth Date <span className="text-red-500">*</span>
-                              </label>
-                              <input
-                                type="date"
-                                id="babyBirthDate"
-                                {...register("babyBirthDate")}
-                                className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
-                                  ${errors.babyBirthDate ? "border-red-500" : "border-gray-300"}
-                                  focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                                className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
                               />
-                              {errors.babyBirthDate && (
-                                <p className="text-red-500 text-xs mt-1">{errors.babyBirthDate.message}</p>
-                              )}
+                              <label htmlFor="hasBabyBirth" className="text-sm text-gray-700">Baby Birth Details</label>
                             </div>
-                            <div className="mt-4">
-                              <label htmlFor="babyBirthWeight" className="block text-sm font-medium text-gray-700 mb-2">
-                                Baby Birth Weight (kg) <span className="text-red-500">*</span>
+                            {hasBabyBirthChecked && (
+                              <>
+                                <div className="mt-4">
+                                  <label htmlFor="babyBirthDate" className="block text-sm font-medium text-gray-700 mb-2">
+                                    Baby Birth Date <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="date"
+                                    id="babyBirthDate"
+                                    {...register("babyBirthDate")}
+                                    className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
+                                      ${errors.babyBirthDate ? "border-red-500" : "border-gray-300"}
+                                      focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                                  />
+                                  {errors.babyBirthDate && (
+                                    <p className="text-red-500 text-xs mt-1">{errors.babyBirthDate.message}</p>
+                                  )}
+                                </div>
+                                <div className="mt-4">
+                                  <label htmlFor="babyBirthWeight" className="block text-sm font-medium text-gray-700 mb-2">
+                                    Baby Birth Weight (kg) <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="number"
+                                    id="babyBirthWeight"
+                                    {...register("babyBirthWeight")}
+                                    className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
+                                      ${errors.babyBirthWeight ? "border-red-500" : "border-gray-300"}
+                                      focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                                  />
+                                  {errors.babyBirthWeight && (
+                                    <p className="text-red-500 text-xs mt-1">{errors.babyBirthWeight.message}</p>
+                                  )}
+                                </div>
+                                <div className="mt-4">
+                                  <label htmlFor="babyBirthGender" className="block text-sm font-medium text-gray-700 mb-2">
+                                    Baby Birth Gender <span className="text-red-500">*</span>
+                                  </label>
+                                  <select
+                                    id="babyBirthGender"
+                                    {...register("babyBirthGender")}
+                                    className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
+                                      ${errors.babyBirthGender ? "border-red-500" : "border-gray-300"}
+                                      focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                                  >
+                                    <option value="">Select Gender</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Other">Other</option>
+                                  </select>
+                                  {errors.babyBirthGender && (
+                                    <p className="text-red-500 text-xs mt-1">{errors.babyBirthGender.message}</p>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+
+                          {/* OT Notes only shown if locationType is OT */}
+                          {selectedLocationType === "OT" && (
+                            <div>
+                              <label htmlFor="otNotes" className="block text-sm font-medium text-gray-700 mb-2">
+                                OT Notes/Procedure Details (Optional)
                               </label>
-                              <input
-                                type="number"
-                                id="babyBirthWeight"
-                                {...register("babyBirthWeight")}
+                              <textarea
+                                id="otNotes"
+                                rows={6}
+                                {...register("otNotes")}
+                                placeholder="Enter details about the operation/procedure here..."
                                 className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
-                                  ${errors.babyBirthWeight ? "border-red-500" : "border-gray-300"}
-                                  focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
+                                  ${errors.otNotes ? "border-red-500" : "border-gray-300"}
+                                  focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 resize-y transition-colors`}
                               />
-                              {errors.babyBirthWeight && (
-                                <p className="text-red-500 text-xs mt-1">{errors.babyBirthWeight.message}</p>
+                              {errors.otNotes && (
+                                <p className="text-red-500 text-xs mt-1">{errors.otNotes.message}</p>
                               )}
                             </div>
-                            <div className="mt-4">
-                              <label htmlFor="babyBirthGender" className="block text-sm font-medium text-gray-700 mb-2">
-                                Baby Birth Gender <span className="text-red-500">*</span>
-                              </label>
-                              <select
-                                id="babyBirthGender"
-                                {...register("babyBirthGender")}
-                                className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
-                                  ${errors.babyBirthGender ? "border-red-500" : "border-gray-300"}
-                                  focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors`}
-                              >
-                                <option value="">Select Gender</option>
-                                <option value="Male">Male</option>
-                                <option value="Female">Female</option>
-                                <option value="Other">Other</option>
-                              </select>
-                              {errors.babyBirthGender && (
-                                <p className="text-red-500 text-xs mt-1">{errors.babyBirthGender.message}</p>
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
+                          )}
+                        </motion.div>
+                      )}
 
-                      <div>
-                        <label htmlFor="otNotes" className="block text-sm font-medium text-gray-700 mb-2">
-                          OT Notes/Procedure Details (Optional)
-                        </label>
-                        <textarea
-                          id="otNotes"
-                          rows={6}
-                          {...register("otNotes")}
-                          placeholder="Enter details about the operation/procedure here..."
-                          className={`w-full px-4 py-2 border rounded-lg shadow-sm bg-white
-                            ${errors.otNotes ? "border-red-500" : "border-gray-300"}
-                            focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 resize-y transition-colors`}
-                        />
-                        {errors.otNotes && (
-                          <p className="text-red-500 text-xs mt-1">{errors.otNotes.message}</p>
-                        )}
-                      </div>
+                      {/* Only show submit button if a location type is selected */}
+                      {(selectedLocationType === "OT" || selectedLocationType === "Labour Room") && (
+                        <button
+                          type="submit"
+                          disabled={Boolean(saving || loading || deleting)}
+                          className={`w-full flex items-center justify-center px-6 py-3 border border-transparent rounded-lg shadow-lg text-lg font-semibold text-white
+                            ${Boolean(saving || loading || deleting) ? "bg-gray-400 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-700 focus:ring-teal-500"}
+                            transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2`}
+                        >
+                          {saving ? (
+                            <>
+                              <RefreshCw className="h-5 w-5 animate-spin mr-3" />
+                              <span>{existingOtRecord ? "Updating..." : "Saving..."}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save size={20} className="mr-3" />
+                              <span>{existingOtRecord ? "Update Details" : "Save Details"}</span>
+                            </>
+                          )}
+                        </button>
+                      )}
 
-                      <button
-                        type="submit"
-                        disabled={Boolean(saving || loading || deleting)}
-                        className={`w-full flex items-center justify-center px-6 py-3 border border-transparent rounded-lg shadow-lg text-lg font-semibold text-white
-                          ${Boolean(saving || loading || deleting) ? "bg-gray-400 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-700 focus:ring-teal-500"}
-                          transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2`}
-                      >
-                        {saving ? (
-                          <>
-                            <RefreshCw className="h-5 w-5 animate-spin mr-3" />
-                            <span>{existingOtRecord ? "Updating..." : "Saving..."}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Save size={20} className="mr-3" />
-                            <span>{existingOtRecord ? "Update OT Details" : "Save OT Details"}</span>
-                          </>
-                        )}
-                      </button>
-
-                      {existingOtRecord && (
+                      {existingOtRecord && (selectedLocationType === "OT" || selectedLocationType === "Labour Room") && (
                         <button
                           type="button"
                           onClick={() => setShowClearConfirm(true)}
                           disabled={Boolean(saving || loading || deleting)}
                           className={`w-full flex items-center justify-center px-6 py-3 border border-transparent rounded-lg shadow-lg text-lg font-semibold text-white mt-4
                             ${Boolean(saving || loading || deleting) ? "bg-red-300 cursor-not-allowed" : "bg-red-500 hover:bg-red-600 focus:ring-red-500"}
-                            transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2`}
+                            transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2`} 
                         >
                           {deleting ? (
                             <>
@@ -773,11 +904,12 @@ export default function OTPage() {
                           ) : (
                             <>
                               <Trash2 size={20} className="mr-3" />
-                              <span>Clear OT Data</span>
+                              <span>Clear Data</span>
                             </>
                           )}
                         </button>
                       )}
+
                     </form>
                   </div>
                 </div>

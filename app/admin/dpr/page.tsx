@@ -41,6 +41,9 @@ interface KPIData {
   totalXray: number;
   totalDialysis: number;
   totalPathology: number;
+  totalBirths: number; // NEW
+  birthsInOT: number; // NEW
+  birthsInLabourRoom: number; // NEW
 }
 
 
@@ -82,6 +85,9 @@ const DPRPage = () => {
     totalXray: 0,
     totalDialysis: 0,
     totalPathology: 0,
+    totalBirths: 0, // NEW
+    birthsInOT: 0, // NEW
+    birthsInLabourRoom: 0, // NEW
   });
 
   const [bedManagement, setBedManagement] = useState<BedManagement[]>([]);
@@ -182,6 +188,23 @@ const DPRPage = () => {
       if (dischargeError) {
         console.error("Supabase Discharge Summaries fetch error:", dischargeError);
         throw dischargeError;
+      }
+
+      // NEW: Fetch OT/Labour Room data specifically for baby births
+      const { data: babyBirthsData, error: babyBirthsError } = await supabase
+        .from('ot_details')
+        .select(`
+          id,
+          location_type,
+          has_baby_birth
+        `)
+        .eq('has_baby_birth', true) // Filter for records with baby births
+        .gte('created_at', start)
+        .lte('created_at', end);
+
+      if (babyBirthsError) {
+        console.error("Supabase Baby Births fetch error:", babyBirthsError);
+        throw babyBirthsError;
       }
 
       // --- KPI Calculations ---
@@ -333,6 +356,9 @@ const DPRPage = () => {
         totalXray: totalXray,
         totalDialysis: totalDialysis,
         totalPathology,
+        totalBirths: babyBirthsData?.length || 0, // Calculate total births
+        birthsInOT: babyBirthsData?.filter(b => b.location_type === 'OT').length || 0, // Calculate births in OT
+        birthsInLabourRoom: babyBirthsData?.filter(b => b.location_type === 'Labour Room').length || 0, // Calculate births in Labour Room
       });
 
       // --- Bed Management Tab Data Calculation for the selected date ---
@@ -720,62 +746,71 @@ const DPRPage = () => {
               </div>
             </div>
           </div>
-  
+
+          <div className="kpi">
+            <div className="val">{kpiData.totalBirths}</div>
+            <div className="label">Total Births</div>
+            <div className="opd-breakdown">
+              <div className="opd-item">
+                <div className="v accent-pink">{kpiData.birthsInOT}</div>
+                <div className="t">In OT</div>
+              </div>
+              <div className="opd-item">
+                <div className="v accent-purple">{kpiData.birthsInLabourRoom}</div>
+                <div className="t">Labour Room</div>
+              </div>
+            </div>
+          </div>
+
           <div className="kpi">
             <div className="val">{kpiData.totalIPDAdmissions}</div>
             <div className="label">IPD Admissions</div>
           </div>
-  
+
           <div className="kpi">
             <div className="val">{kpiData.totalOTProcedures}</div>
             <div className="label">OT Procedures</div>
+            <div className="opd-breakdown">
+              <div className="opd-item">
+                <div className="v accent-green">{kpiData.totalMajorOT}</div>
+                <div className="t">Major OT</div>
+              </div>
+              <div className="opd-item">
+                <div className="v accent-green">{kpiData.totalMinorOT}</div>
+                <div className="t">Minor OT</div>
+              </div>
+              <div className="opd-item">
+                {/* Empty for spacing if needed, or remove if only two sub-points */}
+              </div>
+            </div>
           </div>
-  
+
           <div className="kpi">
             <div className="val">{kpiData.totalDischarges}</div>
             <div className="label">Discharges</div>
           </div>
-        </div>
 
-        {/* <CHANGE> Added secondary KPI row for better content density */}
-        <div className="secondary-kpi-grid">
-          <div className="secondary-kpi">
+          <div className="kpi">
             <div className="val">{kpiData.totalDeaths}</div>
             <div className="label">Deaths</div>
           </div>
-          <div className="secondary-kpi">
+
+          <div className="kpi">
             <div className="val">{kpiData.totalXray}</div>
             <div className="label">X-Ray</div>
           </div>
-          <div className="secondary-kpi">
+
+          <div className="kpi">
             <div className="val">{kpiData.totalDialysis}</div>
             <div className="label">Dialysis</div>
           </div>
-          <div className="secondary-kpi">
+
+          <div className="kpi">
             <div className="val">{kpiData.totalPathology}</div>
             <div className="label">Pathology</div>
           </div>
         </div>
-  
-        {/* OT SECTION */}
-        <div className="section">
-          <div className="section-title">Operating Theater Breakdown</div>
-          <div className="ot-grid">
-            <div className="ot">
-              <div className="val">{kpiData.totalMajorOT}</div>
-              <div className="t">Major OT</div>
-            </div>
-            <div className="ot">
-              <div className="val">{kpiData.totalMinorOT}</div>
-              <div className="t">Minor OT</div>
-            </div>
-            <div className="ot">
-              <div className="val">{kpiData.totalOTProcedures}</div>
-              <div className="t">Total OT</div>
-            </div>
-          </div>
-        </div>
-  
+
         {/* BEDS */}
         <div className="section">
           <div className="section-title">Bed Management Overview</div>
@@ -894,6 +929,10 @@ const DPRPage = () => {
 - Total Dialysis: *${kpiData.totalDialysis}*
 
 - Total Pathology: *${kpiData.totalPathology}*
+
+- Total Births: *${kpiData.totalBirths}*
+    In OT: ${kpiData.birthsInOT},
+    Labour Room: ${kpiData.birthsInLabourRoom}
 
 _Generated automatically from the Inficare Management System._`;
 
@@ -1164,6 +1203,28 @@ _Generated automatically from the Inficare Management System._`;
             <CardContent className="pt-1 pb-2 px-3">
               <div className="text-3xl font-bold text-rose-900">{kpiData.totalPathology}</div>
               <p className="text-xs text-rose-600 mt-1">Lab Tests</p>
+            </CardContent>
+          </Card>
+
+          {/* NEW: Total Births KPI Card */}
+          <Card className="rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow duration-300 ease-in-out">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-pink-800">Total Births</CardTitle>
+              <Heart className="h-5 w-5 text-pink-600" />
+            </CardHeader>
+            <CardContent className="pt-1 pb-2 px-3">
+              <div className="text-3xl font-bold text-pink-900">{kpiData.totalBirths}</div>
+              <p className="text-xs text-pink-600 mt-1">Births on {format(parseISO(selectedDate), 'MMM dd')}</p>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <div className="text-center">
+                  <div className="text-sm font-semibold text-pink-600">{kpiData.birthsInOT}</div>
+                  <p className="text-xs text-pink-600">In OT</p>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm font-semibold text-purple-600">{kpiData.birthsInLabourRoom}</div>
+                  <p className="text-xs text-purple-600">Labour Room</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

@@ -50,11 +50,16 @@ interface OtDetailsSupabase {
   id: string;
   ipd_id: number;
   uhid: string;
-  ot_type: "Major" | "Minor";
+  ot_type: "Major" | "Minor" | null; // Made nullable to align with previous changes
   ot_notes: string | null;
-  ot_date: string; // ISO string
+  ot_date: string | null; // Made nullable
   created_at: string; // Creation timestamp (not used for date filtering)
   doctor_id: number | null;
+  has_baby_birth: boolean | null; // New field
+  baby_birth_date: string | null; // New field
+  baby_birth_weight: number | null; // New field
+  baby_birth_gender: "Male" | "Female" | "Other" | null; // New field
+  location_type: "OT" | "Labour Room" | null; // New field
 }
 
 interface DoctorSupabase {
@@ -138,10 +143,17 @@ export default function OTBreakdownPage() {
 
   // Summary counts for Total / Major / Minor
   const otSummary = useMemo(() => {
-    const total = otRecords.length;
-    const major = otRecords.filter(r => r.ot_type === 'Major').length;
-    const minor = otRecords.filter(r => r.ot_type === 'Minor').length;
+    const total = otRecords.filter(r => r.location_type === 'OT').length;
+    const major = otRecords.filter(r => r.location_type === 'OT' && r.ot_type === 'Major').length;
+    const minor = otRecords.filter(r => r.location_type === 'OT' && r.ot_type === 'Minor').length;
     return { total, major, minor };
+  }, [otRecords]);
+
+  const babyBirthSummary = useMemo(() => {
+    const total = otRecords.filter(r => r.has_baby_birth).length;
+    const inOt = otRecords.filter(r => r.has_baby_birth && r.location_type === 'OT').length;
+    const inLabourRoom = otRecords.filter(r => r.has_baby_birth && r.location_type === 'Labour Room').length;
+    return { total, inOt, inLabourRoom };
   }, [otRecords]);
 
   const otsByDoctor = useMemo(() => {
@@ -191,20 +203,27 @@ export default function OTBreakdownPage() {
           ot_date,
           created_at,
           doctor_id,
+          has_baby_birth,
+          baby_birth_date,
+          baby_birth_weight,
+          baby_birth_gender,
+          location_type,
           patient_detail:uhid (name, uhid, age, gender, age_unit)
         `);
 
       if (filters.otType !== 'All') {
-        query = query.eq('ot_type', filters.otType);
+        query = query.eq('ot_type', filters.otType); // Removed .eq('location_type', 'OT')
       }
       if (filters.doctorId !== 'All') {
         query = query.eq('doctor_id', filters.doctorId);
       }
       if (filters.startDate) {
-        query = query.gte('ot_date', filters.startDate);
+        // Apply date filter to both ot_date and baby_birth_date if available
+        query = query.or(`ot_date.gte.${filters.startDate},baby_birth_date.gte.${filters.startDate}`);
       }
       if (filters.endDate) {
-        query = query.lte('ot_date', filters.endDate + 'T23:59:59.999');
+        // Apply date filter to both ot_date and baby_birth_date if available
+        query = query.or(`ot_date.lte.${filters.endDate}T23:59:59.999,baby_birth_date.lte.${filters.endDate}T23:59:59.999`);
       }
 
       query = query.order('ot_date', { ascending: false });
@@ -432,6 +451,23 @@ export default function OTBreakdownPage() {
                       <Stethoscope size={24} />
                     </div>
                   </div>
+
+                  {/* New Baby Birth Summary Cards */}
+                  <div className="bg-white rounded-xl shadow-md p-5 border border-pink-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-500">Total Baby Births</p>
+                      <p className="text-3xl font-bold text-gray-800">{babyBirthSummary.total}</p>
+                      {babyBirthSummary.total > 0 && (
+                        <div className="mt-2 text-sm text-gray-600 space-y-0.5">
+                          <p><strong>In OT:</strong> {babyBirthSummary.inOt}</p>
+                          <p><strong>In Labour Room:</strong> {babyBirthSummary.inLabourRoom}</p>
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-3 rounded-full bg-pink-100 text-pink-600">
+                      <User size={24} />
+                    </div>
+                  </div>
                 </div>
               </section>
 
@@ -489,10 +525,11 @@ export default function OTBreakdownPage() {
                         <tr>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Patient Name</th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UHID</th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OT Type</th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OT Date (Actual)</th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OT Type / Location</th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OT Date / Birth Date</th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Operating Doctor</th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Baby Details</th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Notes</th>
                         </tr>
                       </thead>
@@ -509,18 +546,30 @@ export default function OTBreakdownPage() {
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{record.uhid}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full
-                                ${record.ot_type === 'Major' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
-                                {record.ot_type}
+                                ${record.location_type === 'OT' && record.ot_type === 'Major' ? 'bg-red-100 text-red-800' : 
+                                  record.location_type === 'OT' && record.ot_type === 'Minor' ? 'bg-blue-100 text-blue-800' : 
+                                  record.location_type === 'Labour Room' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'}`}>
+                                {record.location_type === 'OT' ? record.ot_type : record.location_type}
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {record.ot_date ? format(parseISO(record.ot_date), 'dd MMM, yyyy') : 'N/A'}
+                              {record.location_type === 'OT' && record.ot_date ? format(parseISO(record.ot_date), 'dd MMM, yyyy') : 
+                               record.location_type === 'Labour Room' && record.baby_birth_date ? format(parseISO(record.baby_birth_date), 'dd MMM, yyyy') : 'N/A'}
                             </td>
                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               {record.created_at ? format(parseISO(record.created_at), 'dd MMM, yyyy') : 'N/A'}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {doctors.find(doc => doc.id === record.doctor_id)?.dr_name || 'Not Selected'}
+                              {record.location_type === 'OT' ? doctors.find(doc => doc.id === record.doctor_id)?.dr_name || 'Not Selected' : 'N/A'}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500">
+                              {record.has_baby_birth ? (
+                                <div className="space-y-0.5">
+                                  <p><strong>Date:</strong> {record.baby_birth_date ? format(parseISO(record.baby_birth_date), 'dd MMM, yyyy') : 'N/A'}</p>
+                                  <p><strong>Weight:</strong> {record.baby_birth_weight ? `${record.baby_birth_weight} kg` : 'N/A'}</p>
+                                  <p><strong>Gender:</strong> {record.baby_birth_gender || 'N/A'}</p>
+                                </div>
+                              ) : 'N/A'}
                             </td>
                             <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">{record.ot_notes || 'No notes'}</td>
                           </motion.tr>
