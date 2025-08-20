@@ -289,7 +289,7 @@ export default function OPDPrescriptionPage() {
   const handleVoiceInput = useCallback(
     async (text: string) => {
       setIsSubmitting(true);
-      const apiKey = "AIzaSyA0G8Jhg6yJu-D_OI97_NXgcJTlOes56P8"; // Use environment variable in production
+      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY; // Use environment variable for security
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
       const existingSymptoms = getValues("symptoms");
