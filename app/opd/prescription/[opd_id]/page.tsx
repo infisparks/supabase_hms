@@ -290,7 +290,7 @@ export default function OPDPrescriptionPage() {
     async (text: string) => {
       setIsSubmitting(true);
       const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY; // Use environment variable for security
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
       const existingSymptoms = getValues("symptoms");
       // Combine existing symptoms with new voice input. Add a newline for separation.
