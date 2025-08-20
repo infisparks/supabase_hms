@@ -105,6 +105,7 @@ const Sidebar = () => {
         submenu: [
           { title: 'Appointment', href: '/opd/appointment' },
           { title: 'OPD List', href: '/opd/list' },
+          { title: 'OPD List Prescription', href: '/opd/list/opdlistprescripitono' },
           { title: 'Add Doctor', href: '/opd/add-doctor' },
         ]
       },
@@ -128,6 +129,7 @@ const Sidebar = () => {
         submenu: [
           { title: 'Appointment', href: '/opd/appointment' },
           { title: 'OPD List', href: '/opd/list' },
+          { title: 'OPD List Prescription', href: '/opd/list/opdlistprescripitono' },
           { title: 'Add Doctor', href: '/opd/add-doctor' },
         ]
       },
