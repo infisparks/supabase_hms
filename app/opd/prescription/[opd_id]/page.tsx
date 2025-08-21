@@ -163,7 +163,6 @@ export default function OPDPrescriptionPage() {
   const prescriptionContentRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const currentTranscriptRef = useRef<string>("");
-  // *** FIX: Ref to track listening state to solve stale state in event handlers ***
   const isListeningRef = useRef(false);
 
   const { register, handleSubmit, reset, setValue, getValues } = useForm<PrescriptionFormInputs>({
@@ -353,23 +352,31 @@ Now, process this input: "${combinedTextForAI}".
 
     const recognition = new SpeechRecognitionAPI() as SpeechRecognition;
     recognitionRef.current = recognition;
-    recognition.lang = "en-IN"; // Set to Indian English for better accent recognition
+    recognition.lang = "en-IN";
     recognition.interimResults = true;
     recognition.continuous = true;
 
+    // *** CORRECTED LOGIC TO PREVENT DUPLICATION ***
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let finalTranscript = "";
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
+      let interimTranscript = "";
+
+      // Iterate through all results from the beginning.
+      // The API provides the full history of the utterance in the results list.
+      for (let i = 0; i < event.results.length; i++) {
+        const transcriptPart = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
+          finalTranscript += transcriptPart + " ";
+        } else {
+          interimTranscript += transcriptPart;
         }
       }
 
-      // We combine the stored transcript with the new final part
-      if (finalTranscript) {
-        currentTranscriptRef.current += (currentTranscriptRef.current ? " " : "") + finalTranscript;
-        setLiveTranscript(currentTranscriptRef.current);
-      }
+      // Rebuild the final transcript from scratch. This prevents appending duplicates.
+      currentTranscriptRef.current = finalTranscript.trim();
+
+      // Update the live display to show the complete final transcript plus the current interim part.
+      setLiveTranscript(finalTranscript + interimTranscript);
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -380,22 +387,18 @@ Now, process this input: "${combinedTextForAI}".
       setLiveTranscript("");
     };
 
-    // *** FIX: This handler now differentiates between an intentional stop and an automatic timeout ***
     recognition.onend = () => {
-      // Case 1: Intentional stop by the user. `isListeningRef.current` will be false.
       if (!isListeningRef.current) {
         console.log("Intentional stop. Processing final transcript.");
         if (currentTranscriptRef.current) {
           handleVoiceInput(currentTranscriptRef.current);
-          currentTranscriptRef.current = ""; // Clear for next session
+          currentTranscriptRef.current = "";
         }
-        setLiveTranscript(""); // Clear display transcript
+        setLiveTranscript("");
         recognitionRef.current = null;
-        return; // Exit the function
+        return;
       }
-
-      // Case 2: Unexpected stop (e.g., browser timeout). `isListeningRef.current` is still true.
-      // We simply restart the recognition to continue listening.
+      
       console.log("Recognition service ended unexpectedly, attempting to restart.");
       if (recognitionRef.current) {
         recognitionRef.current.start();
@@ -410,12 +413,11 @@ Now, process this input: "${combinedTextForAI}".
     toast.info("Listening for your input...");
   };
   
-  // *** FIX: `stopListening` now correctly manages state before stopping the recognition engine ***
   const stopListening = () => {
     if (recognitionRef.current) {
-      isListeningRef.current = false; // Signal that this is an intentional stop
+      isListeningRef.current = false;
       setIsListening(false);
-      recognitionRef.current.stop(); // This will trigger the `onend` event
+      recognitionRef.current.stop();
       toast.info("Stopped listening. Processing your input...");
     }
   };
