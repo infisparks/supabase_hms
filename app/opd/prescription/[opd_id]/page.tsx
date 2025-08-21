@@ -159,11 +159,12 @@ export default function OPDPrescriptionPage() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyModalItems, setHistoryModalItems] = useState<OPDPrescriptionRow[]>([]);
 
-  // Refs for PDF generation
+  // Refs
   const prescriptionContentRef = useRef<HTMLDivElement>(null);
-
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const currentTranscriptRef = useRef<string>(""); // To store ongoing transcript for AI processing
+  const currentTranscriptRef = useRef<string>("");
+  // *** FIX: Ref to track listening state to solve stale state in event handlers ***
+  const isListeningRef = useRef(false);
 
   const { register, handleSubmit, reset, setValue, getValues } = useForm<PrescriptionFormInputs>({
     defaultValues: {
@@ -182,27 +183,20 @@ export default function OPDPrescriptionPage() {
     const opdNum = Number(opd_id);
 
     try {
-      // Fetch OPD registration and patient details by opd_id
       const { data: opdData, error: opdError } = await supabase
         .from("opd_registration")
-        .select(
-          `
-          uhid,
-          patient_detail:patient_detail!opd_registration_uhid_fkey (*)
-        `
-        )
+        .select(`uhid, patient_detail:patient_detail!opd_registration_uhid_fkey (*)`)
         .eq("opd_id", opdNum)
         .single();
 
       if (opdError || !opdData) {
         toast.error("Failed to load patient data for this OPD ID.");
         console.error("Error fetching OPD registration:", opdError?.message);
-        router.push("/opd/list/opdlistprescripitono"); // Redirect if patient not found
+        router.push("/opd/list/opdlistprescripitono");
         return;
       }
       setPatientData(opdData.patient_detail as unknown as PatientDetail);
 
-      // Fetch existing prescription for this opd_id
       const { data: prescriptionData, error: prescriptionError } = await supabase
         .from("opd_prescriptions")
         .select("*")
@@ -224,14 +218,14 @@ export default function OPDPrescriptionPage() {
         setShowMedicineDetails(prescriptionData.medicines && prescriptionData.medicines.length > 0);
       } else {
         setCurrentPrescription(null);
-        reset(); // Clear form if no existing prescription
+        reset();
         setMedicines([{ name: "", consumptionDays: "", times: { morning: false, evening: false, night: false }, instruction: "" }]);
         setShowMedicineDetails(false);
       }
     } catch (error: any) {
       console.error("An unexpected error occurred during data fetch:", error.message);
       toast.error("An unexpected error occurred while loading data.");
-      router.push("/opd/list/opdlistprescripitono"); // Redirect on unexpected error
+      router.push("/opd/list/opdlistprescripitono");
     } finally {
       setIsLoading(false);
     }
@@ -247,15 +241,10 @@ export default function OPDPrescriptionPage() {
     const opdNum = Number(opd_id);
 
     async function setupRealtimeChannel() {
-      // First, get the primary key of the prescription row if it exists
       const { data } = await supabase.from("opd_prescriptions").select("id").eq("opd_id", opdNum).single();
-
-      if (!data?.id) {
-        return;
-      }
+      if (!data?.id) return;
 
       const prescriptionPkId = data.id;
-
       channel = supabase
         .channel(`opd_prescription_row_${prescriptionPkId}`)
         .on(
@@ -269,20 +258,14 @@ export default function OPDPrescriptionPage() {
           async (payload) => {
             console.log("Realtime change detected for prescription PK row:", payload);
             toast.info(`Database change detected for prescription: ${payload.eventType}`);
-            await fetchPatientAndPrescriptionData(); // Re-fetch to update UI
+            await fetchPatientAndPrescriptionData();
           }
         )
         .subscribe();
     }
-
-    if (opd_id) {
-      setupRealtimeChannel();
-    }
-
+    if (opd_id) setupRealtimeChannel();
     return () => {
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
+      if (channel) supabase.removeChannel(channel);
     };
   }, [opd_id, fetchPatientAndPrescriptionData]);
 
@@ -295,11 +278,10 @@ export default function OPDPrescriptionPage() {
         setIsSubmitting(false);
         return;
       }
-      const apiKey = 'AIzaSyBfOoeNLDfSVJ5eV1hkxqkuVWRkBnAI_eE'; // Use environment variable for security
+      const apiKey = 'AIzaSyBfOoeNLDfSVJ5eV1hkxqkuVWRkBnAI_eE'; // Use environment variable
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
       const existingSymptoms = getValues("symptoms");
-      // Combine existing symptoms with new voice input. Add a newline for separation.
       const combinedTextForAI = existingSymptoms ? `${existingSymptoms}\n${text}` : text;
 
       const prompt = `You are a medical assistant. Your task is to extract medical details from the given input and structure them into a JSON object. If the input is in Hindi or any other language, translate it to professional English first, then extract the details. The output must be ONLY the JSON object.
@@ -317,30 +299,6 @@ The JSON object should have these keys:
     - \`instruction\`: (string) Specific instruction for this medicine (e.g., "after food", "before sleep").
 
 If a field is not mentioned in the input, use an empty string for text fields or an empty array for the medicines array, and false for boolean flags within 'times'.
-
-Example input: "मरीज को बुखार है और सर्दी है। पेरासिटामोल 3 दिनों के लिए सुबह-शाम खाने के बाद लें। एंटीबायोटिक 5 दिनों के लिए रात में।"
-
-Expected JSON output for the example:
-\`\`\`json
-{
-  "symptoms": "Patient has fever and cold.",
-  "overallInstruction": "",
-  "medicines": [
-    {
-      "name": "Paracetamol",
-      "consumptionDays": "3 days",
-      "times": { "morning": true, "evening": true, "night": false },
-      "instruction": "after food"
-    },
-    {
-      "name": "Antibiotic",
-      "consumptionDays": "5 days",
-      "times": { "morning": false, "evening": false, "night": true },
-      "instruction": ""
-    }
-  ]
-}
-\`\`\`
 
 Now, process this input: "${combinedTextForAI}".
 `;
@@ -365,15 +323,12 @@ Now, process this input: "${combinedTextForAI}".
         }
 
         const structuredData: Partial<PrescriptionFormInputs & { medicines: MedicineEntry[] }> = JSON.parse(jsonText);
-
-        // Update form fields
         if (structuredData.symptoms != null) setValue("symptoms", structuredData.symptoms);
         if (structuredData.overallInstruction != null) setValue("overallInstruction", structuredData.overallInstruction);
         if (structuredData.medicines && structuredData.medicines.length > 0) {
           setMedicines(structuredData.medicines);
           setShowMedicineDetails(true);
         }
-
         toast.success("Voice input processed successfully!");
       } catch (error) {
         console.error("Vertex AI request failed:", error);
@@ -386,90 +341,81 @@ Now, process this input: "${combinedTextForAI}".
   );
 
   const startListening = () => {
-    const SpeechRecognitionAPI =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionAPI) {
       toast.error("Speech Recognition not supported in your browser.");
       return;
     }
 
     if (recognitionRef.current) {
-      recognitionRef.current.stop(); // Stop any existing recognition instance
-      recognitionRef.current = null;
+      recognitionRef.current.stop();
     }
 
     const recognition = new SpeechRecognitionAPI() as SpeechRecognition;
     recognitionRef.current = recognition;
-    recognition.lang = "en-US"; // Keep English for recognition, AI prompt handles Hindi translation
-    recognition.interimResults = true; // Enable interim results for live transcript
-    recognition.continuous = true; // Set to true for continuous listening
+    recognition.lang = "en-IN"; // Set to Indian English for better accent recognition
+    recognition.interimResults = true;
+    recognition.continuous = true;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let interimTranscript = "";
       let finalTranscript = "";
-
       for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript;
-        } else {
-          interimTranscript += transcript;
+          finalTranscript += event.results[i][0].transcript;
         }
       }
 
-      setLiveTranscript(interimTranscript || finalTranscript); // Show interim or final
-
+      // We combine the stored transcript with the new final part
       if (finalTranscript) {
         currentTranscriptRef.current += (currentTranscriptRef.current ? " " : "") + finalTranscript;
+        setLiveTranscript(currentTranscriptRef.current);
       }
     };
+
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error("Speech recognition error:", event.error, event.message);
       toast.error(`Speech recognition error: ${event.error}`);
-      if (event.error === "no-speech") {
-        toast.info("No speech detected. Please try again.");
-      } else if (event.error === "not-allowed") {
-        toast.error("Microphone access denied. Please allow microphone access in your browser settings.");
-        setIsListening(false);
-        setLiveTranscript("");
-        recognitionRef.current = null;
-      } else if (isListening) { // Only restart if still meant to be listening
-        console.log("Speech recognition error, attempting to restart...");
-        startListening(); // Attempt to restart recognition
-      } else {
-        setIsListening(false);
-        setLiveTranscript("");
-        recognitionRef.current = null;
-      }
+      isListeningRef.current = false;
+      setIsListening(false);
+      setLiveTranscript("");
     };
+
+    // *** FIX: This handler now differentiates between an intentional stop and an automatic timeout ***
     recognition.onend = () => {
-      // When recognition ends (due to stop() or error), process the accumulated transcript
-      if (currentTranscriptRef.current) {
-        handleVoiceInput(currentTranscriptRef.current);
-        currentTranscriptRef.current = ""; // Clear for next session
-      }
-      // If still supposed to be listening, restart recognition
-      if (isListening) {
-        console.log("Recognition ended unexpectedly, restarting...");
-        startListening();
-      } else {
-        setIsListening(false);
-        setLiveTranscript(""); // Clear live transcript when listening stops
+      // Case 1: Intentional stop by the user. `isListeningRef.current` will be false.
+      if (!isListeningRef.current) {
+        console.log("Intentional stop. Processing final transcript.");
+        if (currentTranscriptRef.current) {
+          handleVoiceInput(currentTranscriptRef.current);
+          currentTranscriptRef.current = ""; // Clear for next session
+        }
+        setLiveTranscript(""); // Clear display transcript
         recognitionRef.current = null;
+        return; // Exit the function
+      }
+
+      // Case 2: Unexpected stop (e.g., browser timeout). `isListeningRef.current` is still true.
+      // We simply restart the recognition to continue listening.
+      console.log("Recognition service ended unexpectedly, attempting to restart.");
+      if (recognitionRef.current) {
+        recognitionRef.current.start();
       }
     };
 
     recognition.start();
+    isListeningRef.current = true;
     setIsListening(true);
-    currentTranscriptRef.current = ""; // Reset current transcript on start
-    setLiveTranscript("Listening..."); // Initial message
+    currentTranscriptRef.current = "";
+    setLiveTranscript("Listening...");
     toast.info("Listening for your input...");
   };
-
+  
+  // *** FIX: `stopListening` now correctly manages state before stopping the recognition engine ***
   const stopListening = () => {
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      // onend will be triggered which will then process the transcript
+      isListeningRef.current = false; // Signal that this is an intentional stop
+      setIsListening(false);
+      recognitionRef.current.stop(); // This will trigger the `onend` event
       toast.info("Stopped listening. Processing your input...");
     }
   };
@@ -477,56 +423,32 @@ Now, process this input: "${combinedTextForAI}".
   useEffect(() => {
     return () => {
       if (recognitionRef.current) {
+        isListeningRef.current = false;
         recognitionRef.current.stop();
-        recognitionRef.current = null;
       }
     };
   }, []);
 
   // --- Medicine Details Functions ---
-  const toggleMedicineDetails = () => {
-    setShowMedicineDetails((prev) => !prev);
-  };
-
-  const addMedicine = () => {
-    setMedicines([
-      ...medicines,
-      { name: "", consumptionDays: "", times: { morning: false, evening: false, night: false }, instruction: "" },
-    ]);
-  };
-
-  const handleRemoveMedicine = (index: number) => {
-    setMedicines((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleMedicineChange = (index: number, field: keyof MedicineEntry, value: any) => {
-    setMedicines((prev) => prev.map((med, i) => (i === index ? { ...med, [field]: value } : med)));
-  };
-
-  const handleTimeToggle = (index: number, time: keyof MedicineEntry["times"]) => {
-    setMedicines((prev) =>
-      prev.map((med, i) => (i === index ? { ...med, times: { ...med.times, [time]: !med.times[time] } } : med))
-    );
-  };
+  const toggleMedicineDetails = () => setShowMedicineDetails((prev) => !prev);
+  const addMedicine = () => setMedicines([...medicines, { name: "", consumptionDays: "", times: { morning: false, evening: false, night: false }, instruction: "" }]);
+  const handleRemoveMedicine = (index: number) => setMedicines((prev) => prev.filter((_, i) => i !== index));
+  const handleMedicineChange = (index: number, field: keyof MedicineEntry, value: any) => setMedicines((prev) => prev.map((med, i) => (i === index ? { ...med, [field]: value } : med)));
+  const handleTimeToggle = (index: number, time: keyof MedicineEntry["times"]) => setMedicines((prev) => prev.map((med, i) => (i === index ? { ...med, times: { ...med.times, [time]: !med.times[time] } } : med)));
 
   // --- Form Submission (Add/Update Prescription) ---
   const onSubmit: SubmitHandler<PrescriptionFormInputs> = async (formData) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
-
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       const currentUserEmail = user?.email || "unknown";
-
       const opdNum = Number(opd_id);
       const patientUHID = patientData?.uhid;
       if (!patientUHID) {
         toast.error("Patient UHID not found. Cannot save prescription.");
         return;
       }
-
       const prescriptionPayload: Partial<OPDPrescriptionRow> = {
         opd_id: opdNum,
         uhid: patientUHID,
@@ -536,17 +458,11 @@ Now, process this input: "${combinedTextForAI}".
         updated_at: new Date().toISOString(),
         updated_by: currentUserEmail,
       };
-
       let error;
       if (currentPrescription) {
-        // Update existing prescription
-        const { error: updateError } = await supabase
-          .from("opd_prescriptions")
-          .update(prescriptionPayload)
-          .eq("id", currentPrescription.id);
+        const { error: updateError } = await supabase.from("opd_prescriptions").update(prescriptionPayload).eq("id", currentPrescription.id);
         error = updateError;
       } else {
-        // Insert new prescription
         const { error: insertError } = await supabase.from("opd_prescriptions").insert({
           ...prescriptionPayload,
           created_by: currentUserEmail,
@@ -554,13 +470,11 @@ Now, process this input: "${combinedTextForAI}".
         });
         error = insertError;
       }
-
       if (error) {
         console.error("Error saving prescription:", error.message);
         toast.error("Failed to save prescription. Please try again.");
       } else {
         toast.success("Prescription saved successfully!");
-        // Re-fetch data to update UI and currentPrescription state
         await fetchPatientAndPrescriptionData();
       }
     } catch (error: any) {
@@ -581,14 +495,10 @@ Now, process this input: "${combinedTextForAI}".
   // --- PDF Generation ---
   const generatePDFBlob = useCallback(async (prescriptionToGenerate: OPDPrescriptionRow | null) => {
     const dataToUse = prescriptionToGenerate || currentPrescription;
-
     if (!prescriptionContentRef.current || !patientData || !dataToUse) return null;
-
     const pdf = new jsPDF("p", "mm", "a4");
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
-
-    // Set background image
     const letterheadImage = "/letterhead.png";
     const img = new Image();
     img.src = letterheadImage;
@@ -596,44 +506,19 @@ Now, process this input: "${combinedTextForAI}".
       img.onload = () => resolve(null);
       img.onerror = () => {
         console.error("Error loading letterhead image.");
-        resolve(null); // Resolve even on error to not block PDF generation
+        resolve(null);
       };
     });
-
-    // Temporarily set the styles on the ref for accurate rendering
     const originalRefStyle = prescriptionContentRef.current.style.cssText;
-    prescriptionContentRef.current.style.position = "static"; // Make visible for html2canvas
+    prescriptionContentRef.current.style.position = "static";
     prescriptionContentRef.current.style.left = "0";
     prescriptionContentRef.current.style.top = "0";
     prescriptionContentRef.current.style.background = `url(${letterheadImage}) no-repeat center top / contain`;
-    prescriptionContentRef.current.style.color = "#000"; // Ensure text is black for PDF
-
-    // Populate the hidden div with the relevant prescription data
-    // This is crucial for html2canvas to render the correct history item
+    prescriptionContentRef.current.style.color = "#000";
     const symptomsContent = dataToUse.symptoms || "N/A";
     const overallInstructionContent = dataToUse.overall_instruction || "N/A";
-    const medicinesContent =
-      dataToUse.medicines && dataToUse.medicines.length > 0
-        ? dataToUse.medicines
-            .map(
-              (med, idx) => `
-          <div style="display: flex; padding: 4px 0; border-bottom: 1px dashed #eee;">
-            <div style="flex: 3; font-size: 10pt;">${med.name}</div>
-            <div style="flex: 1; text-align: center; font-size: 10pt;">${med.consumptionDays}</div>
-            <div style="flex: 2; text-align: center; font-size: 10pt;">
-              ${(med.times.morning ? "Morning " : "") + (med.times.evening ? "Evening " : "") + (med.times.night ? "Night" : "")}
-            </div>
-            <div style="flex: 4; font-size: 10pt; white-space: pre-wrap; word-break: break-word;">${med.instruction}</div>
-          </div>
-        `
-            )
-            .join("")
-        : '<p style="font-size: 10pt;">No medicines prescribed.</p>';
-
-    // Update the content of the ref
     if (prescriptionContentRef.current) {
       prescriptionContentRef.current.innerHTML = `
-       
         <div style="display: flex; justify-content: space-between; margin-bottom: 8mm; border-bottom: 1px solid #ccc; padding-bottom: 2mm;">
           <div style="width: 48%;">
             <p style="font-size: 11pt; margin: 2px 0;"><strong>Name:</strong> ${patientData.name}</p>
@@ -659,9 +544,7 @@ Now, process this input: "${combinedTextForAI}".
             </thead>
             <tbody>
               ${dataToUse.medicines && dataToUse.medicines.length > 0
-                ? dataToUse.medicines
-                    .map(
-                      (med) => `
+                ? dataToUse.medicines.map((med) => `
                   <tr>
                     <td style="border: none; border-bottom: 1px dashed #eee; padding: 6px; font-size: 10pt;">${med.name}</td>
                     <td style="border: none; border-bottom: 1px dashed #eee; padding: 6px; text-align: center; font-size: 10pt;">${med.consumptionDays}</td>
@@ -670,9 +553,7 @@ Now, process this input: "${combinedTextForAI}".
                     </td>
                     <td style="border: none; border-bottom: 1px dashed #eee; padding: 6px; font-size: 10pt; white-space: pre-wrap; word-break: break-word;">${med.instruction}</td>
                   </tr>
-                `
-                    )
-                    .join("")
+                `).join("")
                 : `<tr><td colspan="4" style="border: none; border-bottom: 1px dashed #eee; padding: 6px; text-align: center; font-size: 10pt;">No medicines prescribed.</td></tr>`
               }
             </tbody>
@@ -688,16 +569,12 @@ Now, process this input: "${combinedTextForAI}".
         </div>
       `;
     }
-
-    const canvas = await html2canvas(prescriptionContentRef.current, { scale: 2 }); // Increased scale for better quality
+    const canvas = await html2canvas(prescriptionContentRef.current, { scale: 2 });
     const imgData = canvas.toDataURL("image/jpeg", 1.0);
     pdf.addImage(imgData, "JPEG", 0, 0, pdfWidth, pdfHeight);
-
-    // Restore original style to hidden div
     if (prescriptionContentRef.current) {
       prescriptionContentRef.current.style.cssText = originalRefStyle;
     }
-
     return pdf.output("blob");
   }, [patientData, currentPrescription]);
 
@@ -708,94 +585,63 @@ Now, process this input: "${combinedTextForAI}".
       return;
     }
     const blobURL = URL.createObjectURL(pdfBlob);
-    window.open(blobURL, "_blank"); // Open in new tab
+    window.open(blobURL, "_blank");
     URL.revokeObjectURL(blobURL);
     toast.success("Prescription opened successfully!");
   };
 
   const uploadPdfAndSendWhatsApp = async () => {
-    if (!currentPrescription || !patientData) {
-      toast.error("Prescription data or patient data not loaded yet.");
+    if (!currentPrescription || !patientData || !patientData.number) {
+      toast.error(patientData?.number ? "Prescription data not loaded." : "Patient phone number is not available.");
       return;
     }
-    if (!patientData.number) {
-      toast.error("Patient phone number is not available to send WhatsApp.");
-      return;
-    }
-
     setIsSendingWhatsApp(true);
-    let whatsappLink = "";
-
     try {
       const pdfBlob = await generatePDFBlob(currentPrescription);
       if (!pdfBlob) {
         toast.error("Failed to generate PDF for WhatsApp.");
         return;
       }
-
       const fileName = `prescription-${patientData.uhid}-${opd_id}-${uuidv4()}.pdf`;
-      const filePath = `opd_prescriptions/${fileName}`; // Folder and filename in Supabase Storage
-
-      // 1. Upload PDF to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("dpr-documents") // Your Supabase bucket name (create if not exists)
-        .upload(filePath, pdfBlob, {
-          contentType: "application/pdf",
-          upsert: false, // Do not overwrite if file exists with same name (though UUID should prevent this)
-        });
-
+      const filePath = `opd_prescriptions/${fileName}`;
+      const { error: uploadError } = await supabase.storage.from("dpr-documents").upload(filePath, pdfBlob, {
+        contentType: "application/pdf",
+        upsert: false,
+      });
       if (uploadError) {
         console.error("Error uploading PDF:", uploadError.message);
         toast.error(`Failed to upload PDF: ${uploadError.message}`);
         return;
       }
-
-      // 2. Get public URL of the uploaded PDF
-      const { data: publicUrlData } = supabase.storage
-        .from("dpr-documents")
-        .getPublicUrl(filePath);
-
-      whatsappLink = publicUrlData.publicUrl;
-      console.log("Public URL:", whatsappLink);
-
+      const { data: publicUrlData } = supabase.storage.from("dpr-documents").getPublicUrl(filePath);
+      const whatsappLink = publicUrlData.publicUrl;
       if (!whatsappLink) {
         toast.error("Failed to get public URL for the PDF.");
         return;
       }
-
-      // 3. Send WhatsApp message
-      const rawNumber = String(patientData.number); // Ensure it's a string
+      const rawNumber = String(patientData.number);
       const formattedNumber = rawNumber.startsWith("91") ? rawNumber : `91${rawNumber}`;
-
       const payload = {
-        token: "99583991573", // Replace with your actual WhatsApp API token
+        token: "99583991573", // Replace with your token
         number: formattedNumber,
-        imageUrl: whatsappLink, // Use imageUrl for sending a document link
-        caption: `Dear ${patientData.name}, please find attached your prescription PDF for OPD ID ${opd_id}. Thank you for choosing our services.`,
+        imageUrl: whatsappLink,
+        caption: `Dear ${patientData.name}, please find attached your prescription PDF for OPD ID ${opd_id}. Thank you.`,
       };
-
-      console.log("WhatsApp Payload:", payload);
-
       const response = await fetch("https://a.infispark.in/send-image-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`WhatsApp API responded with status ${response.status}: ${errorText}`);
       }
-
       const result = await response.json();
-      console.log("WhatsApp API response:", result);
-
-      if (result.status === "success") { // Adjust based on your API's success response
+      if (result.status === "success") {
         toast.success("Prescription sent to WhatsApp successfully!");
       } else {
         toast.error(`Failed to send WhatsApp: ${result.message || "Unknown error"}`);
       }
-
     } catch (error: any) {
       console.error("Error sending WhatsApp:", error.message);
       toast.error(`Error sending WhatsApp: ${error.message}`);
@@ -821,23 +667,18 @@ Now, process this input: "${combinedTextForAI}".
       setHistoryModalItems([]);
       return;
     }
-
     try {
       const { data, error } = await supabase
         .from("opd_prescriptions")
         .select("*")
         .eq("uhid", patientData.uhid)
         .order("created_at", { ascending: false });
-
       if (error) {
         console.error("Error fetching previous prescriptions:", error.message);
         toast.error("Failed to load previous prescriptions.");
         setHistoryModalItems([]);
       } else {
-        // Filter out the current prescription if it exists and is loaded
-        const filteredHistory = data.filter(
-          (item) => !(currentPrescription && item.id === currentPrescription.id)
-        ) as OPDPrescriptionRow[];
+        const filteredHistory = data.filter((item) => !(currentPrescription && item.id === currentPrescription.id)) as OPDPrescriptionRow[];
         setHistoryModalItems(filteredHistory);
       }
     } catch (error: any) {
@@ -846,11 +687,8 @@ Now, process this input: "${combinedTextForAI}".
     }
   }, [patientData, currentPrescription]);
 
-  // Effect to fetch history when modal opens
   useEffect(() => {
-    if (showHistoryModal) {
-      fetchPreviousPrescriptions();
-    }
+    if (showHistoryModal) fetchPreviousPrescriptions();
   }, [showHistoryModal, fetchPreviousPrescriptions]);
 
   if (isLoading) {
@@ -899,11 +737,11 @@ Now, process this input: "${combinedTextForAI}".
             >
               {isListening ? (
                 <>
-                  <MicOff className="h-4 w-4 mr-2 animate-pulse" /> Stop Listening
+                  <MicOff className="h-4 w-4 mr-2 animate-pulse" /> Stop Listening & Process
                 </>
               ) : (
                 <>
-                  <Mic className="h-4 w-4 mr-2" /> Fill Form via Voice
+                  <Mic className="h-4 w-4 mr-2" /> Start Voice Input
                 </>
               )}
             </Button>
@@ -958,15 +796,14 @@ Now, process this input: "${combinedTextForAI}".
                       </DialogHeader>
                       <div className="py-1.5 space-y-2">
                         {historyModalItems.length === 0 ? (
-                          <p className="text-center text-gray-500 text-xs">No previous prescriptions found for this patient.</p>
+                          <p className="text-center text-gray-500 text-xs">No previous prescriptions found.</p>
                         ) : (
                           historyModalItems.map((historyItem) => (
                             <Card key={historyItem.id} className="border border-slate-200 shadow-sm p-2">
                               <CardHeader className="p-0 pb-1.5 flex flex-row justify-between items-center">
                                 <div>
                                   <CardTitle className="text-sm sm:text-lg">
-                                    Prescription from{" "}
-                                    {historyItem.created_at ? format(parseISO(historyItem.created_at), "MMM dd, yyyy hh:mm a") : "N/A"}
+                                    Prescription from {format(parseISO(historyItem.created_at), "MMM dd, yyyy")}
                                   </CardTitle>
                                   <p className="text-xs text-gray-500">By: {historyItem.created_by || "N/A"}</p>
                                 </div>
@@ -982,7 +819,7 @@ Now, process this input: "${combinedTextForAI}".
                               </CardHeader>
                               <CardContent className="p-0 space-y-1.5 text-xs">
                                 <div>
-                                  <h4 className="font-semibold text-gray-700">Symptoms/Disease:</h4>
+                                  <h4 className="font-semibold text-gray-700">Symptoms:</h4>
                                   <p className="text-gray-600">{historyItem.symptoms || "N/A"}</p>
                                 </div>
                                 {historyItem.medicines && historyItem.medicines.length > 0 && (
@@ -1004,9 +841,7 @@ Now, process this input: "${combinedTextForAI}".
                                               <TableCell className="text-[10px] p-0.5">{med.name}</TableCell>
                                               <TableCell className="text-[10px] p-0.5">{med.consumptionDays}</TableCell>
                                               <TableCell className="text-[10px] p-0.5">
-                                                {(med.times.morning ? "Morning " : "") +
-                                                  (med.times.evening ? "Evening " : "") +
-                                                  (med.times.night ? "Night" : "")}
+                                                {(med.times.morning ? "M " : "") + (med.times.evening ? "E " : "") + (med.times.night ? "N" : "")}
                                               </TableCell>
                                               <TableCell className="text-[10px] p-0.5">{med.instruction || "N/A"}</TableCell>
                                             </TableRow>
@@ -1016,10 +851,6 @@ Now, process this input: "${combinedTextForAI}".
                                     </div>
                                   </div>
                                 )}
-                                <div>
-                                  <h4 className="font-semibold text-gray-700">Overall Instructions:</h4>
-                                  <p className="text-gray-600">{historyItem.overall_instruction || "N/A"}</p>
-                                </div>
                               </CardContent>
                             </Card>
                           ))
@@ -1047,72 +878,24 @@ Now, process this input: "${combinedTextForAI}".
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2 gap-y-1.5">
                         <div>
-                          <label htmlFor={`medicine-name-${index}`} className="block text-xs font-medium text-gray-700 mb-0.5">
-                            Medicine Name
-                          </label>
-                          <Input
-                            id={`medicine-name-${index}`}
-                            type="text"
-                            value={medicine.name}
-                            onChange={(e) => handleMedicineChange(index, "name", e.target.value)}
-                            placeholder="e.g., Paracetamol"
-                            className="p-1.5 text-xs h-8"
-                          />
+                          <label className="block text-xs font-medium text-gray-700 mb-0.5">Name</label>
+                          <Input type="text" value={medicine.name} onChange={(e) => handleMedicineChange(index, "name", e.target.value)} placeholder="e.g., Paracetamol" className="p-1.5 text-xs h-8"/>
                         </div>
                         <div>
-                          <label htmlFor={`consumption-days-${index}`} className="block text-xs font-medium text-gray-700 mb-0.5">
-                            Consumption Days
-                          </label>
-                          <Input
-                            id={`consumption-days-${index}`}
-                            type="text"
-                            value={medicine.consumptionDays}
-                            onChange={(e) => handleMedicineChange(index, "consumptionDays", e.target.value)}
-                            placeholder="e.g., 7 days"
-                            className="p-1.5 text-xs h-8"
-                          />
+                          <label className="block text-xs font-medium text-gray-700 mb-0.5">Days</label>
+                          <Input type="text" value={medicine.consumptionDays} onChange={(e) => handleMedicineChange(index, "consumptionDays", e.target.value)} placeholder="e.g., 7 days" className="p-1.5 text-xs h-8"/>
                         </div>
                         <div className="col-span-1 sm:col-span-2">
-                          <label className="block text-xs font-medium text-gray-700 mb-0.5">Times per day</label>
+                          <label className="block text-xs font-medium text-gray-700 mb-0.5">Times</label>
                           <div className="flex flex-wrap gap-1.5">
-                            <Button
-                              type="button"
-                              variant={medicine.times.morning ? "default" : "outline"}
-                              onClick={() => handleTimeToggle(index, "morning")}
-                              className="px-2.5 py-1 text-xs h-auto"
-                            >
-                              Morning
-                            </Button>
-                            <Button
-                              type="button"
-                              variant={medicine.times.evening ? "default" : "outline"}
-                              onClick={() => handleTimeToggle(index, "evening")}
-                              className="px-2.5 py-1 text-xs h-auto"
-                            >
-                              Evening
-                            </Button>
-                            <Button
-                              type="button"
-                              variant={medicine.times.night ? "default" : "outline"}
-                              onClick={() => handleTimeToggle(index, "night")}
-                              className="px-2.5 py-1 text-xs h-auto"
-                            >
-                              Night
-                            </Button>
+                            <Button type="button" variant={medicine.times.morning ? "default" : "outline"} onClick={() => handleTimeToggle(index, "morning")} className="px-2.5 py-1 text-xs h-auto">Morning</Button>
+                            <Button type="button" variant={medicine.times.evening ? "default" : "outline"} onClick={() => handleTimeToggle(index, "evening")} className="px-2.5 py-1 text-xs h-auto">Evening</Button>
+                            <Button type="button" variant={medicine.times.night ? "default" : "outline"} onClick={() => handleTimeToggle(index, "night")} className="px-2.5 py-1 text-xs h-auto">Night</Button>
                           </div>
                         </div>
                         <div className="col-span-1 sm:col-span-2">
-                          <label htmlFor={`medicine-instruction-${index}`} className="block text-xs font-medium text-gray-700 mb-0.5">
-                            Instruction (Optional)
-                          </label>
-                          <Textarea
-                            id={`medicine-instruction-${index}`}
-                            value={medicine.instruction}
-                            onChange={(e) => handleMedicineChange(index, "instruction", e.target.value)}
-                            rows={1}
-                            placeholder="e.g., After food, Before sleep"
-                            className="p-1.5 text-xs min-h-[unset]"
-                          />
+                          <label className="block text-xs font-medium text-gray-700 mb-0.5">Instruction</label>
+                          <Textarea value={medicine.instruction} onChange={(e) => handleMedicineChange(index, "instruction", e.target.value)} rows={1} placeholder="e.g., After food" className="p-1.5 text-xs min-h-[unset]"/>
                         </div>
                       </div>
                     </Card>
@@ -1127,56 +910,30 @@ Now, process this input: "${combinedTextForAI}".
                 <label htmlFor="overallInstruction" className="block text-xs sm:text-sm font-medium text-gray-700 mb-0.5">
                   Overall Instructions
                 </label>
-                <Textarea
-                  id="overallInstruction"
-                  {...register("overallInstruction")}
-                  placeholder="Any additional instructions or notes..."
-                  rows={2}
-                  className="w-full p-1.5 text-xs"
-                />
+                <Textarea id="overallInstruction" {...register("overallInstruction")} placeholder="Any additional notes..." rows={2} className="w-full p-1.5 text-xs"/>
               </div>
 
-              <Button type="submit" disabled={isSubmitting} className="w-full bg-green-600 hover:bg-green-700 text-white text-xs py-1.5 mt-2">
-                {isSubmitting ? (
-                  <>
-                    <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Saving…
-                  </>
-                ) : (
-                  <>
-                    <UserCheck className="h-3.5 w-3.5 mr-1.5" /> Save Prescription
-                  </>
-                )}
-              </Button>
-
-              <Button
-                type="button"
-                onClick={clearPrescription}
-                variant="outline"
-                className="w-full sm:w-auto text-red-600 border-red-300 hover:bg-red-50 text-xs py-1.5"
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Clear Prescription
-              </Button>
+              <div className="grid grid-cols-2 gap-2 mt-4">
+                <Button type="submit" disabled={isSubmitting} className="w-full bg-green-600 hover:bg-green-700 text-xs py-1.5">
+                  {isSubmitting ? (<><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin"/>Saving…</>) : (<><UserCheck className="h-3.5 w-3.5 mr-1.5"/>Save Prescription</>)}
+                </Button>
+                <Button type="button" onClick={clearPrescription} variant="outline" className="w-full text-red-600 border-red-300 hover:bg-red-50 text-xs py-1.5">
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5"/>Clear Form
+                </Button>
+              </div>
 
               {currentPrescription && (
-                <div className="mt-2 flex flex-col sm:flex-row space-y-1.5 sm:space-y-0 sm:space-x-1.5">
-                  <Button type="button" onClick={downloadPrescription} variant="secondary" className="w-full sm:w-auto text-xs py-1.5">
-                    <Download className="h-3.5 w-3.5 mr-1.5" /> View Prescription PDF
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Button type="button" onClick={downloadPrescription} variant="secondary" className="w-full text-xs py-1.5">
+                    <Download className="h-3.5 w-3.5 mr-1.5"/>View PDF
                   </Button>
                   <Button
                     type="button"
                     onClick={uploadPdfAndSendWhatsApp}
-                    disabled={isSendingWhatsApp || !currentPrescription || !patientData?.number}
-                    className="w-full sm:w-auto bg-green-500 hover:bg-green-600 text-white text-xs py-1.5"
+                    disabled={isSendingWhatsApp || !patientData?.number}
+                    className="w-full bg-green-500 hover:bg-green-600 text-white text-xs py-1.5"
                   >
-                    {isSendingWhatsApp ? (
-                      <>
-                        <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Sending...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="h-3.5 w-3.5 mr-1.5" /> Send on WhatsApp
-                      </>
-                    )}
+                    {isSendingWhatsApp ? (<><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin"/>Sending...</>) : (<>Send on WhatsApp</>)}
                   </Button>
                 </div>
               )}
@@ -1184,21 +941,21 @@ Now, process this input: "${combinedTextForAI}".
           </CardContent>
         </Card>
 
-        {/* Hidden PDF Content - This div is used by html2canvas to generate the PDF */}
+        {/* Hidden PDF Content */}
         <div style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
           <div
             ref={prescriptionContentRef}
             style={{
               width: "210mm",
               minHeight: "297mm",
-              padding: "60mm 15mm 15mm 15mm", // Adjusted padding for more top space
+              padding: "60mm 15mm 15mm 15mm",
               color: "#000",
               fontFamily: "Arial, sans-serif",
               boxSizing: "border-box",
               position: "relative",
             }}
           >
-            {/* Content will be dynamically populated by generatePDFBlob */}
+            {/* Content populated by generatePDFBlob */}
           </div>
         </div>
       </div>
