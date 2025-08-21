@@ -36,6 +36,7 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { v4 as uuidv4 } from "uuid"; // Import for unique file names
 import { User } from "@supabase/supabase-js"; // Import User type
+import Layout from "@/components/global/Layout"; // Import Layout component
 
 // --- Type Definitions ---
 interface PatientDetail {
@@ -290,7 +291,7 @@ export default function OPDPrescriptionPage() {
     async (text: string) => {
       setIsSubmitting(true);
       const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY; // Use environment variable for security
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
       const existingSymptoms = getValues("symptoms");
       // Combine existing symptoms with new voice input. Add a newline for separation.
@@ -847,334 +848,337 @@ Now, process this input: "${combinedTextForAI}".
   }
 
   return (
-    <div className="container mx-auto p-2 sm:p-4">
-      <div className="flex flex-col sm:flex-row justify-between items-center mb-4 sm:mb-6">
-        <h1 className="text-xl sm:text-3xl font-bold text-gray-900 flex items-center gap-2 mb-3 sm:mb-0">
-          <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-          OPD Prescription
-        </h1>
-        <Button onClick={() => router.push("/opd/list/opdlistprescripitono")} variant="outline" className="w-full sm:w-auto mt-2 sm:mt-0">
-          <ArrowLeft className="h-4 w-4 mr-2" /> Back to OPD List
-        </Button>
-      </div>
-
-      <Card className="shadow-lg border border-gray-200 mb-4">
-        <CardHeader className="p-3 sm:p-4 pb-2">
-          <CardTitle className="text-lg sm:text-2xl font-semibold text-gray-800">
-            Patient: {patientData.name} (UHID: {patientData.uhid})
-          </CardTitle>
-          <p className="text-sm sm:text-base text-gray-600">OPD ID: {opd_id}</p>
-        </CardHeader>
-        <CardContent className="p-3 sm:p-4 pt-1">
-          <Button
-            type="button"
-            onClick={isListening ? stopListening : startListening}
-            disabled={isSubmitting}
-            className="w-full mb-3 bg-purple-600 hover:bg-purple-700 text-white text-sm py-2"
-          >
-            {isListening ? (
-              <>
-                <MicOff className="h-4 w-4 mr-2 animate-pulse" /> Stop Listening
-              </>
-            ) : (
-              <>
-                <Mic className="h-4 w-4 mr-2" /> Fill Form via Voice
-              </>
-            )}
+    <Layout>
+      <div className="container mx-auto p-2 sm:p-4">
+        <div className="flex flex-col sm:flex-row justify-between items-center mb-4 sm:mb-6">
+          <h1 className="text-xl sm:text-3xl font-bold text-gray-900 flex items-center gap-2 mb-3 sm:mb-0">
+            <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+            OPD Prescription
+          </h1>
+          <Button onClick={() => router.push("/opd/list/opdlistprescripitono")} variant="outline" className="w-full sm:w-auto mt-2 sm:mt-0">
+            <ArrowLeft className="h-4 w-4 mr-2" /> Back to OPD List
           </Button>
+        </div>
 
-          {isListening && liveTranscript && (
-            <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-md text-blue-800 text-sm">
-              <p className="font-semibold">Live Transcript:</p>
-              <p className="italic">{liveTranscript}</p>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
-            <div>
-              <label htmlFor="symptoms" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
-                Symptoms/Disease
-              </label>
-              <Textarea
-                id="symptoms"
-                {...register("symptoms", { required: true })}
-                placeholder="Enter symptoms or disease..."
-                rows={2}
-                className="w-full p-2 text-sm"
-              />
-            </div>
-
-            <div className="flex flex-col sm:flex-row justify-between items-center gap-2 mt-3">
-              <Button
-                type="button"
-                onClick={toggleMedicineDetails}
-                variant="outline"
-                className="w-full sm:w-auto text-blue-600 border-blue-300 hover:bg-blue-50 text-sm py-2"
-              >
-                <PlusCircle className="h-4 w-4 mr-2" />
-                {showMedicineDetails ? "Hide Medicine Details" : "Add Medicine Details"}
-              </Button>
-
-              {patientData?.uhid && (
-                <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="w-full sm:w-auto text-gray-600 border-gray-300 hover:bg-gray-50 text-sm py-2">
-                      <History className="h-4 w-4 mr-2" /> View Previous Prescriptions
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[900px] max-h-[95vh] overflow-y-auto p-4">
-                    <DialogHeader className="pb-2">
-                      <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                        <History className="h-5 w-5 text-gray-600" /> Prescription History for {patientData.name}
-                      </DialogTitle>
-                      <DialogDescription className="text-sm">
-                        Review past prescriptions for this patient.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="py-2 space-y-3">
-                      {historyModalItems.length === 0 ? (
-                        <p className="text-center text-gray-500 text-sm">No previous prescriptions found for this patient.</p>
-                      ) : (
-                        historyModalItems.map((historyItem) => (
-                          <Card key={historyItem.id} className="border border-slate-200 shadow-sm p-3">
-                            <CardHeader className="p-0 pb-2 flex flex-row justify-between items-center">
-                              <div>
-                                <CardTitle className="text-base sm:text-lg">
-                                  Prescription from{" "}
-                                  {historyItem.created_at ? format(parseISO(historyItem.created_at), "MMM dd, yyyy hh:mm a") : "N/A"}
-                                </CardTitle>
-                                <p className="text-xs text-gray-500">By: {historyItem.created_by || "N/A"}</p>
-                              </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => viewHistoryPrescription(historyItem)}
-                                className="text-blue-500 hover:bg-blue-50 px-2 py-1 text-xs h-auto"
-                              >
-                                <Eye className="h-4 w-4 mr-1" /> View PDF
-                              </Button>
-                            </CardHeader>
-                            <CardContent className="p-0 space-y-2 text-sm">
-                              <div>
-                                <h4 className="font-semibold text-gray-700">Symptoms/Disease:</h4>
-                                <p className="text-gray-600">{historyItem.symptoms || "N/A"}</p>
-                              </div>
-                              {historyItem.medicines && historyItem.medicines.length > 0 && (
-                                <div>
-                                  <h4 className="font-semibold text-gray-700">Medicines:</h4>
-                                  <div className="overflow-x-auto">
-                                    <Table className="min-w-full">
-                                      <TableHeader>
-                                        <TableRow>
-                                          <TableHead className="text-xs p-1">Name</TableHead>
-                                          <TableHead className="text-xs p-1">Days</TableHead>
-                                          <TableHead className="text-xs p-1">Time</TableHead>
-                                          <TableHead className="text-xs p-1">Instruction</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {historyItem.medicines.map((med, idx) => (
-                                          <TableRow key={idx}>
-                                            <TableCell className="text-xs p-1">{med.name}</TableCell>
-                                            <TableCell className="text-xs p-1">{med.consumptionDays}</TableCell>
-                                            <TableCell className="text-xs p-1">
-                                              {(med.times.morning ? "Morning " : "") +
-                                                (med.times.evening ? "Evening " : "") +
-                                                (med.times.night ? "Night" : "")}
-                                            </TableCell>
-                                            <TableCell className="text-xs p-1">{med.instruction || "N/A"}</TableCell>
-                                          </TableRow>
-                                        ))}
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-                                </div>
-                              )}
-                              <div>
-                                <h4 className="font-semibold text-gray-700">Overall Instructions:</h4>
-                                <p className="text-gray-600">{historyItem.overall_instruction || "N/A"}</p>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))
-                      )}
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              )}
-            </div>
-
-            {showMedicineDetails && (
-              <div className="space-y-3 border p-3 rounded-md bg-gray-50 mt-3">
-                <h3 className="text-base font-semibold flex items-center gap-2">
-                  <FileText className="h-5 w-5" /> Medicines
-                </h3>
-                {medicines.map((medicine, index) => (
-                  <Card key={index} className="p-3 border border-slate-200">
-                    <div className="flex justify-between items-center mb-2">
-                      <h4 className="font-semibold text-sm">Medicine {index + 1}</h4>
-                      {medicines.length > 1 && (
-                        <Button type="button" variant="destructive" size="sm" onClick={() => handleRemoveMedicine(index)} className="px-2 py-1 text-xs h-auto">
-                          <Trash2 className="h-3 w-3 mr-1" /> Remove
-                        </Button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-2">
-                      <div>
-                        <label htmlFor={`medicine-name-${index}`} className="block text-xs font-medium text-gray-700 mb-0.5">
-                          Medicine Name
-                        </label>
-                        <Input
-                          id={`medicine-name-${index}`}
-                          type="text"
-                          value={medicine.name}
-                          onChange={(e) => handleMedicineChange(index, "name", e.target.value)}
-                          placeholder="e.g., Paracetamol"
-                          className="p-2 text-sm h-9"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor={`consumption-days-${index}`} className="block text-xs font-medium text-gray-700 mb-0.5">
-                          Consumption Days
-                        </label>
-                        <Input
-                          id={`consumption-days-${index}`}
-                          type="text"
-                          value={medicine.consumptionDays}
-                          onChange={(e) => handleMedicineChange(index, "consumptionDays", e.target.value)}
-                          placeholder="e.g., 7 days"
-                          className="p-2 text-sm h-9"
-                        />
-                      </div>
-                      <div className="col-span-1 sm:col-span-2">
-                        <label className="block text-xs font-medium text-gray-700 mb-0.5">Times per day</label>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant={medicine.times.morning ? "default" : "outline"}
-                            onClick={() => handleTimeToggle(index, "morning")}
-                            className="px-3 py-1 text-xs h-auto"
-                          >
-                            Morning
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={medicine.times.evening ? "default" : "outline"}
-                            onClick={() => handleTimeToggle(index, "evening")}
-                            className="px-3 py-1 text-xs h-auto"
-                          >
-                            Evening
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={medicine.times.night ? "default" : "outline"}
-                            onClick={() => handleTimeToggle(index, "night")}
-                            className="px-3 py-1 text-xs h-auto"
-                          >
-                            Night
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="col-span-1 sm:col-span-2">
-                        <label htmlFor={`medicine-instruction-${index}`} className="block text-xs font-medium text-gray-700 mb-0.5">
-                          Instruction (Optional)
-                        </label>
-                        <Textarea
-                          id={`medicine-instruction-${index}`}
-                          value={medicine.instruction}
-                          onChange={(e) => handleMedicineChange(index, "instruction", e.target.value)}
-                          rows={1}
-                          placeholder="e.g., After food, Before sleep"
-                          className="p-2 text-sm min-h-[unset]"
-                        />
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-                <Button type="button" onClick={addMedicine} variant="outline" className="w-full text-sm py-2">
-                  <PlusCircle className="h-4 w-4 mr-2" /> Add More Medicine
-                </Button>
-              </div>
-            )}
-
-            <div>
-              <label htmlFor="overallInstruction" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
-                Overall Instructions
-              </label>
-              <Textarea
-                id="overallInstruction"
-                {...register("overallInstruction")}
-                placeholder="Any additional instructions or notes..."
-                rows={2}
-                className="w-full p-2 text-sm"
-              />
-            </div>
-
-            <Button type="submit" disabled={isSubmitting} className="w-full bg-green-600 hover:bg-green-700 text-white text-sm py-2 mt-3">
-              {isSubmitting ? (
+        <Card className="shadow-lg border border-gray-200 mb-4 text-xs sm:text-sm">
+          <CardHeader className="p-2 sm:p-4 pb-1 sm:pb-2">
+            <CardTitle className="text-base sm:text-2xl font-semibold text-gray-800">
+              Patient: {patientData.name} (UHID: {patientData.uhid})
+            </CardTitle>
+            <p className="text-xs sm:text-base text-gray-600">OPD ID: {opd_id}</p>
+          </CardHeader>
+          <CardContent className="p-2 sm:p-4 pt-1">
+            <Button
+              type="button"
+              onClick={isListening ? stopListening : startListening}
+              disabled={isSubmitting}
+              className="w-full mb-2 bg-purple-600 hover:bg-purple-700 text-white text-xs py-1.5 sm:text-sm sm:py-2"
+            >
+              {isListening ? (
                 <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Saving…
+                  <MicOff className="h-4 w-4 mr-2 animate-pulse" /> Stop Listening
                 </>
               ) : (
                 <>
-                  <UserCheck className="h-4 w-4 mr-2" /> Save Prescription
+                  <Mic className="h-4 w-4 mr-2" /> Fill Form via Voice
                 </>
               )}
             </Button>
 
-            <Button
-              type="button"
-              onClick={clearPrescription}
-              variant="outline"
-              className="w-full sm:w-auto text-red-600 border-red-300 hover:bg-red-50 text-sm py-2"
-            >
-              <Trash2 className="h-4 w-4 mr-2" /> Clear Prescription
-            </Button>
-
-            {currentPrescription && (
-              <div className="mt-3 flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
-                <Button type="button" onClick={downloadPrescription} variant="secondary" className="w-full sm:w-auto text-sm py-2">
-                  <Download className="h-4 w-4 mr-2" /> View Prescription PDF
-                </Button>
-                <Button
-                  type="button"
-                  onClick={uploadPdfAndSendWhatsApp}
-                  disabled={isSendingWhatsApp || !currentPrescription || !patientData?.number}
-                  className="w-full sm:w-auto bg-green-500 hover:bg-green-600 text-white text-sm py-2"
-                >
-                  {isSendingWhatsApp ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Sending...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-4 w-4 mr-2" /> Send on WhatsApp
-                    </>
-                  )}
-                </Button>
+            {isListening && liveTranscript && (
+              <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-md text-blue-800 text-sm">
+                <p className="font-semibold">Live Transcript:</p>
+                <p className="italic">{liveTranscript}</p>
               </div>
             )}
-          </form>
-        </CardContent>
-      </Card>
 
-      {/* Hidden PDF Content - This div is used by html2canvas to generate the PDF */}
-      <div style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
-        <div
-          ref={prescriptionContentRef}
-          style={{
-            width: "210mm",
-            minHeight: "297mm",
-            padding: "60mm 15mm 15mm 15mm", // Adjusted padding for more top space
-            color: "#000",
-            fontFamily: "Arial, sans-serif",
-            boxSizing: "border-box",
-            position: "relative",
-          }}
-        >
-          {/* Content will be dynamically populated by generatePDFBlob */}
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+              <div>
+                <label htmlFor="symptoms" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                  Symptoms/Disease
+                </label>
+                <Textarea
+                  id="symptoms"
+                  {...register("symptoms", { required: true })}
+                  placeholder="Enter symptoms or disease..."
+                  rows={2}
+                  className="w-full p-2 text-sm"
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-2 mt-3">
+                <Button
+                  type="button"
+                  onClick={toggleMedicineDetails}
+                  variant="outline"
+                  className="w-full sm:w-auto text-blue-600 border-blue-300 hover:bg-blue-50 text-sm py-2"
+                >
+                  <PlusCircle className="h-4 w-4 mr-2" />
+                  {showMedicineDetails ? "Hide Medicine Details" : "Add Medicine Details"}
+                </Button>
+
+                {patientData?.uhid && (
+                  <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" className="w-full sm:w-auto text-gray-600 border-gray-300 hover:bg-gray-50 text-xs py-1.5 sm:text-sm sm:py-2">
+                        <History className="h-4 w-4 mr-1.5" /> View Previous Prescriptions
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[900px] max-h-[95vh] overflow-y-auto p-3 sm:p-4">
+                      <DialogHeader className="pb-1.5 sm:pb-2">
+                        <DialogTitle className="flex items-center gap-1.5 text-base sm:text-xl">
+                          <History className="h-4.5 w-4.5 text-gray-600" /> Prescription History for {patientData.name}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs">
+                          Review past prescriptions for this patient.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="py-1.5 space-y-2">
+                        {historyModalItems.length === 0 ? (
+                          <p className="text-center text-gray-500 text-xs">No previous prescriptions found for this patient.</p>
+                        ) : (
+                          historyModalItems.map((historyItem) => (
+                            <Card key={historyItem.id} className="border border-slate-200 shadow-sm p-2">
+                              <CardHeader className="p-0 pb-1.5 flex flex-row justify-between items-center">
+                                <div>
+                                  <CardTitle className="text-sm sm:text-lg">
+                                    Prescription from{" "}
+                                    {historyItem.created_at ? format(parseISO(historyItem.created_at), "MMM dd, yyyy hh:mm a") : "N/A"}
+                                  </CardTitle>
+                                  <p className="text-xs text-gray-500">By: {historyItem.created_by || "N/A"}</p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => viewHistoryPrescription(historyItem)}
+                                  className="text-blue-500 hover:bg-blue-50 px-1.5 py-0.5 text-xs h-auto"
+                                >
+                                  <Eye className="h-3.5 w-3.5 mr-1" /> View PDF
+                                </Button>
+                              </CardHeader>
+                              <CardContent className="p-0 space-y-1.5 text-xs">
+                                <div>
+                                  <h4 className="font-semibold text-gray-700">Symptoms/Disease:</h4>
+                                  <p className="text-gray-600">{historyItem.symptoms || "N/A"}</p>
+                                </div>
+                                {historyItem.medicines && historyItem.medicines.length > 0 && (
+                                  <div>
+                                    <h4 className="font-semibold text-gray-700">Medicines:</h4>
+                                    <div className="overflow-x-auto">
+                                      <Table className="min-w-full">
+                                        <TableHeader>
+                                          <TableRow>
+                                            <TableHead className="text-[10px] p-0.5">Name</TableHead>
+                                            <TableHead className="text-[10px] p-0.5">Days</TableHead>
+                                            <TableHead className="text-[10px] p-0.5">Time</TableHead>
+                                            <TableHead className="text-[10px] p-0.5">Instruction</TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {historyItem.medicines.map((med, idx) => (
+                                            <TableRow key={idx}>
+                                              <TableCell className="text-[10px] p-0.5">{med.name}</TableCell>
+                                              <TableCell className="text-[10px] p-0.5">{med.consumptionDays}</TableCell>
+                                              <TableCell className="text-[10px] p-0.5">
+                                                {(med.times.morning ? "Morning " : "") +
+                                                  (med.times.evening ? "Evening " : "") +
+                                                  (med.times.night ? "Night" : "")}
+                                              </TableCell>
+                                              <TableCell className="text-[10px] p-0.5">{med.instruction || "N/A"}</TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    </div>
+                                  </div>
+                                )}
+                                <div>
+                                  <h4 className="font-semibold text-gray-700">Overall Instructions:</h4>
+                                  <p className="text-gray-600">{historyItem.overall_instruction || "N/A"}</p>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                )}
+              </div>
+
+              {showMedicineDetails && (
+                <div className="space-y-2 border p-2 rounded-md bg-gray-50 mt-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                    <FileText className="h-4 w-4" /> Medicines
+                  </h3>
+                  {medicines.map((medicine, index) => (
+                    <Card key={index} className="p-2 border border-slate-200">
+                      <div className="flex justify-between items-center mb-1.5">
+                        <h4 className="font-semibold text-xs">Medicine {index + 1}</h4>
+                        {medicines.length > 1 && (
+                          <Button type="button" variant="destructive" size="sm" onClick={() => handleRemoveMedicine(index)} className="px-1.5 py-0.5 text-xs h-auto">
+                            <Trash2 className="h-3 w-3 mr-1" /> Remove
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2 gap-y-1.5">
+                        <div>
+                          <label htmlFor={`medicine-name-${index}`} className="block text-xs font-medium text-gray-700 mb-0.5">
+                            Medicine Name
+                          </label>
+                          <Input
+                            id={`medicine-name-${index}`}
+                            type="text"
+                            value={medicine.name}
+                            onChange={(e) => handleMedicineChange(index, "name", e.target.value)}
+                            placeholder="e.g., Paracetamol"
+                            className="p-1.5 text-xs h-8"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor={`consumption-days-${index}`} className="block text-xs font-medium text-gray-700 mb-0.5">
+                            Consumption Days
+                          </label>
+                          <Input
+                            id={`consumption-days-${index}`}
+                            type="text"
+                            value={medicine.consumptionDays}
+                            onChange={(e) => handleMedicineChange(index, "consumptionDays", e.target.value)}
+                            placeholder="e.g., 7 days"
+                            className="p-1.5 text-xs h-8"
+                          />
+                        </div>
+                        <div className="col-span-1 sm:col-span-2">
+                          <label className="block text-xs font-medium text-gray-700 mb-0.5">Times per day</label>
+                          <div className="flex flex-wrap gap-1.5">
+                            <Button
+                              type="button"
+                              variant={medicine.times.morning ? "default" : "outline"}
+                              onClick={() => handleTimeToggle(index, "morning")}
+                              className="px-2.5 py-1 text-xs h-auto"
+                            >
+                              Morning
+                            </Button>
+                            <Button
+                              type="button"
+                              variant={medicine.times.evening ? "default" : "outline"}
+                              onClick={() => handleTimeToggle(index, "evening")}
+                              className="px-2.5 py-1 text-xs h-auto"
+                            >
+                              Evening
+                            </Button>
+                            <Button
+                              type="button"
+                              variant={medicine.times.night ? "default" : "outline"}
+                              onClick={() => handleTimeToggle(index, "night")}
+                              className="px-2.5 py-1 text-xs h-auto"
+                            >
+                              Night
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="col-span-1 sm:col-span-2">
+                          <label htmlFor={`medicine-instruction-${index}`} className="block text-xs font-medium text-gray-700 mb-0.5">
+                            Instruction (Optional)
+                          </label>
+                          <Textarea
+                            id={`medicine-instruction-${index}`}
+                            value={medicine.instruction}
+                            onChange={(e) => handleMedicineChange(index, "instruction", e.target.value)}
+                            rows={1}
+                            placeholder="e.g., After food, Before sleep"
+                            className="p-1.5 text-xs min-h-[unset]"
+                          />
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                  <Button type="button" onClick={addMedicine} variant="outline" className="w-full text-xs py-1.5">
+                    <PlusCircle className="h-4 w-4 mr-1.5" /> Add More Medicine
+                  </Button>
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="overallInstruction" className="block text-xs sm:text-sm font-medium text-gray-700 mb-0.5">
+                  Overall Instructions
+                </label>
+                <Textarea
+                  id="overallInstruction"
+                  {...register("overallInstruction")}
+                  placeholder="Any additional instructions or notes..."
+                  rows={2}
+                  className="w-full p-1.5 text-xs"
+                />
+              </div>
+
+              <Button type="submit" disabled={isSubmitting} className="w-full bg-green-600 hover:bg-green-700 text-white text-xs py-1.5 mt-2">
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Saving…
+                  </>
+                ) : (
+                  <>
+                    <UserCheck className="h-3.5 w-3.5 mr-1.5" /> Save Prescription
+                  </>
+                )}
+              </Button>
+
+              <Button
+                type="button"
+                onClick={clearPrescription}
+                variant="outline"
+                className="w-full sm:w-auto text-red-600 border-red-300 hover:bg-red-50 text-xs py-1.5"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Clear Prescription
+              </Button>
+
+              {currentPrescription && (
+                <div className="mt-2 flex flex-col sm:flex-row space-y-1.5 sm:space-y-0 sm:space-x-1.5">
+                  <Button type="button" onClick={downloadPrescription} variant="secondary" className="w-full sm:w-auto text-xs py-1.5">
+                    <Download className="h-3.5 w-3.5 mr-1.5" /> View Prescription PDF
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={uploadPdfAndSendWhatsApp}
+                    disabled={isSendingWhatsApp || !currentPrescription || !patientData?.number}
+                    className="w-full sm:w-auto bg-green-500 hover:bg-green-600 text-white text-xs py-1.5"
+                  >
+                    {isSendingWhatsApp ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-3.5 w-3.5 mr-1.5" /> Send on WhatsApp
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Hidden PDF Content - This div is used by html2canvas to generate the PDF */}
+        <div style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
+          <div
+            ref={prescriptionContentRef}
+            style={{
+              width: "210mm",
+              minHeight: "297mm",
+              padding: "60mm 15mm 15mm 15mm", // Adjusted padding for more top space
+              color: "#000",
+              fontFamily: "Arial, sans-serif",
+              boxSizing: "border-box",
+              position: "relative",
+            }}
+          >
+            {/* Content will be dynamically populated by generatePDFBlob */}
+          </div>
         </div>
       </div>
-    </div>
+    </Layout>
   );
 }

@@ -109,8 +109,7 @@ export default function TextareaWithVoice({
 
       recognition.onend = () => {
         if (isRecording) {
-          stopRecording();
-          recognitionRef.current = null;
+          // Removed stopRecording() to prevent auto-stop
         }
       };
 
