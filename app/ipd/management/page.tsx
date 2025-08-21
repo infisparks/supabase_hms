@@ -84,6 +84,7 @@ interface IPDRegistrationSupabase {
   bed_management: BedManagementSupabase | null
   // Join to discharge_summaries (will be an array if multiple exist, but should be single here)
   discharge_summaries: DischargeSummaryRecord[] | null;
+  tpa: boolean | null; // Add tpa field here
 }
 // BillingRecord now includes dischargeType
 interface BillingRecord {
@@ -114,6 +115,7 @@ interface BillingRecord {
   admissionSource: string | null
   admissionType: string | null
   underCareOfDoctor: string | null
+  tpa: boolean | null; // Add tpa field here
 }
 // --- End Type Definitions ---
 export default function IPDManagementPage() {
@@ -122,6 +124,7 @@ export default function IPDManagementPage() {
   // Updated selectedTab to include "discharge-partially"
   const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge" | "discharge-partially">("non-discharge")
   const [selectedWard, setSelectedWard] = useState("All")
+  const [selectedTPA, setSelectedTPA] = useState<"All" | "Yes" | "No">("All") // New state for TPA filter
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const router = useRouter()
@@ -139,7 +142,8 @@ export default function IPDManagementPage() {
           payment_detail,
           patient_detail (patient_id, name, number, age, gender, address, age_unit, dob, uhid),
           bed_management (id, room_type, bed_number, bed_type, status),
-          discharge_summaries (id, discharge_type) // Fetch discharge_type from summary
+          discharge_summaries (id, discharge_type),
+          tpa
           `,
         )
         .order("created_at", { ascending: false })
@@ -246,6 +250,7 @@ export default function IPDManagementPage() {
         admissionSource: null, // Not fetched
         admissionType: null, // Not fetched
         underCareOfDoctor: null, // Not fetched
+        tpa: record.tpa, // Assign the fetched tpa value
       } as BillingRecord
     })
   }, [allIpdRecords, formatRoomType])
@@ -274,6 +279,12 @@ export default function IPDManagementPage() {
     if (selectedWard !== "All") {
       records = records.filter((rec) => rec.roomType.toLowerCase() === selectedWard.toLowerCase())
     }
+    // New TPA filtering
+    if (selectedTPA !== "All") {
+      records = records.filter((rec) =>
+        selectedTPA === "Yes" ? rec.tpa === true : rec.tpa === false
+      );
+    }
     // Search filtering
     if (term) {
       records = records.filter(
@@ -285,7 +296,7 @@ export default function IPDManagementPage() {
       )
     }
     return records
-  }, [nonDischargedRecords, partiallyDischargedRecords, fullyDischargedRecords, searchTerm, selectedTab, selectedWard])
+  }, [nonDischargedRecords, partiallyDischargedRecords, fullyDischargedRecords, searchTerm, selectedTab, selectedWard, selectedTPA])
   // Get unique ward names from all records for filter options
   const uniqueWards = useMemo(() => {
     const wards = new Set<string>()
@@ -531,6 +542,48 @@ export default function IPDManagementPage() {
                     ))}
                   </div>
                 </div>
+                {/* New TPA Filter */}
+                <div className="mb-6">
+                  <div className="flex items-center gap-2 mb-3">
+                    <IndianRupeeIcon className="h-5 w-5 text-slate-600" /> {/* Reusing IndianRupeeIcon, consider adding a new icon for TPA if available/needed */}
+                    <h3 className="font-semibold text-slate-800">Filter by TPA Status</h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge
+                      variant={selectedTPA === "All" ? "default" : "outline"}
+                      className={`cursor-pointer px-3 py-1 text-sm rounded-full transition-colors ${
+                        selectedTPA === "All"
+                          ? "bg-blue-600 text-white hover:bg-blue-700"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300"
+                      }`}
+                      onClick={() => setSelectedTPA("All")}
+                    >
+                      All
+                    </Badge>
+                    <Badge
+                      variant={selectedTPA === "Yes" ? "default" : "outline"}
+                      className={`cursor-pointer px-3 py-1 text-sm rounded-full transition-colors ${
+                        selectedTPA === "Yes"
+                          ? "bg-purple-600 text-white hover:bg-purple-700"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300"
+                      }`}
+                      onClick={() => setSelectedTPA("Yes")}
+                    >
+                      TPA
+                    </Badge>
+                    <Badge
+                      variant={selectedTPA === "No" ? "default" : "outline"}
+                      className={`cursor-pointer px-3 py-1 text-sm rounded-full transition-colors ${
+                        selectedTPA === "No"
+                          ? "bg-gray-600 text-white hover:bg-gray-700"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300"
+                      }`}
+                      onClick={() => setSelectedTPA("No")}
+                    >
+                      Non-TPA
+                    </Badge>
+                  </div>
+                </div>
                 <TabsContent value="non-discharge" className="mt-0">
                   {renderPatientsTable(
                     filteredRecords,
@@ -629,7 +682,14 @@ function renderPatientsTable(
             >
               <td className="px-4 py-3 text-slate-700">{index + 1}</td>
               <td className="px-4 py-3">
-                <div className="font-medium text-slate-800">{record.name}</div>
+                <div className="font-medium text-slate-800 flex items-center gap-2">
+                  {record.name}
+                  {record.tpa && (
+                    <Badge variant="default" className="bg-purple-600 hover:bg-purple-700 text-white">
+                      TPA
+                    </Badge>
+                  )}
+                </div>
                 <div className="text-xs text-slate-500">ID: {record.ipdId.substring(0, 8)}...</div>
                 <div className="text-xs text-slate-500">UHID: {record.uhid}</div>
               </td>
