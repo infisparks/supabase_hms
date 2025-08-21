@@ -295,7 +295,7 @@ export default function OPDPrescriptionPage() {
         setIsSubmitting(false);
         return;
       }
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY; // Use environment variable for security
+      const apiKey = 'AIzaSyBfOoeNLDfSVJ5eV1hkxqkuVWRkBnAI_eE'; // Use environment variable for security
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
       const existingSymptoms = getValues("symptoms");
