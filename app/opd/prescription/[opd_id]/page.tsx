@@ -290,6 +290,11 @@ export default function OPDPrescriptionPage() {
   const handleVoiceInput = useCallback(
     async (text: string) => {
       setIsSubmitting(true);
+      if (!text.trim()) {
+        toast.info("No voice input detected to process.");
+        setIsSubmitting(false);
+        return;
+      }
       const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY; // Use environment variable for security
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
@@ -421,9 +426,21 @@ Now, process this input: "${combinedTextForAI}".
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error("Speech recognition error:", event.error, event.message);
       toast.error(`Speech recognition error: ${event.error}`);
-      setIsListening(false);
-      setLiveTranscript(""); // Clear live transcript on error
-      recognitionRef.current = null;
+      if (event.error === "no-speech") {
+        toast.info("No speech detected. Please try again.");
+      } else if (event.error === "not-allowed") {
+        toast.error("Microphone access denied. Please allow microphone access in your browser settings.");
+        setIsListening(false);
+        setLiveTranscript("");
+        recognitionRef.current = null;
+      } else if (isListening) { // Only restart if still meant to be listening
+        console.log("Speech recognition error, attempting to restart...");
+        startListening(); // Attempt to restart recognition
+      } else {
+        setIsListening(false);
+        setLiveTranscript("");
+        recognitionRef.current = null;
+      }
     };
     recognition.onend = () => {
       // When recognition ends (due to stop() or error), process the accumulated transcript
