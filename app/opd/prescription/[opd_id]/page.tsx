@@ -431,9 +431,15 @@ Now, process this input: "${combinedTextForAI}".
         handleVoiceInput(currentTranscriptRef.current);
         currentTranscriptRef.current = ""; // Clear for next session
       }
-      setIsListening(false);
-      setLiveTranscript(""); // Clear live transcript when listening stops
-      recognitionRef.current = null;
+      // If still supposed to be listening, restart recognition
+      if (isListening) {
+        console.log("Recognition ended unexpectedly, restarting...");
+        startListening();
+      } else {
+        setIsListening(false);
+        setLiveTranscript(""); // Clear live transcript when listening stops
+        recognitionRef.current = null;
+      }
     };
 
     recognition.start();
