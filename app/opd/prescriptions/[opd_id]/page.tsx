@@ -6,7 +6,6 @@ import { useForm, SubmitHandler } from "react-hook-form";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -17,10 +16,9 @@ import {
   UserCheck,
   History,
   FileText,
-  PlusCircle,
-  Download,
   ArrowLeft,
   Eye,
+  Download,
 } from "lucide-react";
 import {
   Dialog,
@@ -50,20 +48,15 @@ interface PatientDetail {
   uhid: string;
 }
 
-interface MedicineEntry {
-  name: string;
-  consumptionDays: string;
-  times: { morning: boolean; evening: boolean; night: boolean };
-  instruction: string;
-}
-
 interface OPDPrescriptionRow {
   id: string;
   opd_id: number;
   uhid: string;
   symptoms: string | null;
-  medicines: MedicineEntry[] | null;
-  overall_instruction: string | null;
+  known_case_of: string | null;
+  treatment: string | null;
+  past_history: string | null;
+  follow_up: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string | null;
@@ -72,19 +65,12 @@ interface OPDPrescriptionRow {
 
 interface PrescriptionFormInputs {
   symptoms: string;
-  overallInstruction: string;
+  known_case_of: string;
+  treatment: string;
+  past_history: string;
+  follow_up: string;
 }
 // --- End Type Definitions ---
-
-// Helper to convert number words to digits
-const wordToNumber = (word: string): number | null => {
-    const wordNumMap: { [key: string]: number } = {
-        one: 1, two: 2, three: 3, four: 4, five: 5,
-        six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-    };
-    return wordNumMap[word.toLowerCase()] || null;
-};
-
 
 export default function OPDPrescriptionPage() {
   const { opd_id } = useParams<{ opd_id: string }>();
@@ -96,11 +82,6 @@ export default function OPDPrescriptionPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
-  const [medicines, setMedicines] = useState<MedicineEntry[]>([
-    { name: "", consumptionDays: "", times: { morning: false, evening: false, night: false }, instruction: "" },
-  ]);
-  const [showMedicineDetails, setShowMedicineDetails] = useState(false);
-  const [activeMedicineIndex, setActiveMedicineIndex] = useState(0);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyModalItems, setHistoryModalItems] = useState<OPDPrescriptionRow[]>([]);
 
@@ -108,7 +89,7 @@ export default function OPDPrescriptionPage() {
   const prescriptionContentRef = useRef<HTMLDivElement>(null);
 
   const { register, handleSubmit, reset, setValue } = useForm<PrescriptionFormInputs>({
-    defaultValues: { symptoms: "", overallInstruction: "" },
+    defaultValues: { symptoms: "", known_case_of: "", treatment: "", past_history: "", follow_up: "" },
   });
 
   // --- Form Submission Logic ---
@@ -130,14 +111,16 @@ export default function OPDPrescriptionPage() {
         opd_id: opdNum,
         uhid: patientUHID,
         symptoms: formData.symptoms,
-        medicines: showMedicineDetails ? medicines.filter(m => m.name) : [],
-        overall_instruction: formData.overallInstruction,
+        known_case_of: formData.known_case_of,
+        treatment: formData.treatment,
+        past_history: formData.past_history,
+        follow_up: formData.follow_up,
         updated_at: new Date().toISOString(),
         updated_by: currentUserEmail,
       };
 
       const { error } = currentPrescription
-        ? await supabase.from("opd_prescriptions").update(prescriptionPayload).eq("id", currentPrescription.id)
+        ? await supabase.from("opd_prescriptions").update(prescriptionPayload).eq("opd_id", opdNum)
         : await supabase.from("opd_prescriptions").insert({ ...prescriptionPayload, created_by: currentUserEmail });
       
       if (error) throw new Error(error.message);
@@ -154,87 +137,47 @@ export default function OPDPrescriptionPage() {
   // --- Voice Command Definitions ---
   const commands = [
     {
-      command: ["disease *", "symptom *", "symptoms *"],
+      command: ["clinical symptoms *", "symptoms *", "symptom *"],
       callback: (content: string) => {
         setValue("symptoms", content);
-        toast.info(`Symptom set to: ${content}`);
+        toast.info(`Clinical symptoms set to: ${content}`);
       },
     },
     {
-      command: ["add medicine *", "new medicine *"],
-      callback: (medicineName: string) => {
-        if (!showMedicineDetails) setShowMedicineDetails(true);
-        const newIndex = medicines.length;
-        setMedicines([...medicines, { name: medicineName, consumptionDays: "", times: { morning: false, evening: false, night: false }, instruction: "" }]);
-        setActiveMedicineIndex(newIndex);
-        toast.success(`Added medicine: ${medicineName}`);
+      command: ["known case of *", "known history *"],
+      callback: (content: string) => {
+        setValue("known_case_of", content);
+        toast.info(`Known case of set to: ${content}`);
       },
     },
     {
-      command: ["add another medicine", "new medicine"],
-      callback: () => {
-        if (!showMedicineDetails) setShowMedicineDetails(true);
-        addMedicine();
-      }
-    },
-    {
-      command: ["select medicine *", "focus on medicine *", "medicine *"],
-      callback: (identifier: string) => {
-        const num = parseInt(identifier, 10);
-        const index = !isNaN(num) ? num - 1 : (wordToNumber(identifier) || 0) - 1;
-
-        if (index >= 0 && index < medicines.length) {
-          setActiveMedicineIndex(index);
-          toast.success(`Selected Medicine ${index + 1}.`);
-        } else {
-          toast.error(`Medicine ${identifier} not found.`);
-        }
+      command: ["treatment *", "prescribe *"],
+      callback: (content: string) => {
+        setValue("treatment", content);
+        toast.info(`Treatment set to: ${content}`);
       },
     },
     {
-      command: ["days *", "for * days", "duration *"],
-      callback: (days: string) => {
-        if (!showMedicineDetails) return;
-        const dayValue = parseInt(days, 10) ? `${parseInt(days, 10)} days` : days;
-        handleMedicineChange(activeMedicineIndex, "consumptionDays", dayValue);
-        toast.info(`Set days for active medicine to: ${dayValue}`);
+      command: ["past history *", "previous history *"],
+      callback: (content: string) => {
+        setValue("past_history", content);
+        toast.info(`Past history set to: ${content}`);
       },
     },
     {
-      command: "set time *",
-      callback: (timeStr: string) => {
-          if (!showMedicineDetails) return;
-          const newTimes = {
-              morning: timeStr.includes("morning"),
-              evening: timeStr.includes("evening"),
-              night: timeStr.includes("night"),
-          };
-          setMedicines(prev => prev.map((med, i) => i === activeMedicineIndex ? { ...med, times: newTimes } : med));
-          toast.info(`Updated time for active medicine.`);
+      command: ["follow up *", "next visit *", "revisit *"],
+      callback: (content: string) => {
+        setValue("follow_up", content);
+        toast.info(`Follow up set to: ${content}`);
       },
     },
     {
-      command: ["instruction *", "add instruction *"],
-      callback: (instruction: string) => {
-        if (!showMedicineDetails) return;
-        handleMedicineChange(activeMedicineIndex, "instruction", instruction);
-        toast.info(`Instruction for active medicine: ${instruction}`);
-      },
+      command: ["clear form", "reset form"],
+      callback: () => clearPrescription(),
     },
     {
-      command: ["overall instruction *", "note *", "final instruction *"],
-      callback: (instruction: string) => {
-        setValue("overallInstruction", instruction);
-        toast.info(`Overall instruction set.`);
-      },
-    },
-    {
-        command: ["clear form", "reset form"],
-        callback: () => clearPrescription(),
-    },
-    {
-        command: ["save prescription", "submit form"],
-        callback: () => handleSubmit(onSubmit)(),
+      command: ["save prescription", "submit form"],
+      callback: () => handleSubmit(onSubmit)(),
     },
   ];
 
@@ -253,7 +196,6 @@ export default function OPDPrescriptionPage() {
   
   // --- Data Fetching & Component Logic ---
   const fetchPatientAndPrescriptionData = useCallback(async () => {
-    // ... (This function remains unchanged from your previous code)
     if (!opd_id) { setIsLoading(false); return; }
     setIsLoading(true);
     const opdNum = Number(opd_id);
@@ -261,19 +203,18 @@ export default function OPDPrescriptionPage() {
       const { data: opdData, error: opdError } = await supabase.from("opd_registration").select(`uhid, patient_detail:patient_detail!opd_registration_uhid_fkey (*)`).eq("opd_id", opdNum).single();
       if (opdError || !opdData) { toast.error("Failed to load patient data."); router.push("/opd/list/opdlistprescripitono"); return; }
       setPatientData(opdData.patient_detail as unknown as PatientDetail);
+      
       const { data: presData, error: presError } = await supabase.from("opd_prescriptions").select("*").eq("opd_id", opdNum).single();
       if (presError && presError.code !== "PGRST116") { toast.error("Failed to load prescription."); }
       else if (presData) {
         setCurrentPrescription(presData);
         setValue("symptoms", presData.symptoms || "");
-        setValue("overallInstruction", presData.overall_instruction || "");
-        const loadedMedicines = presData.medicines && presData.medicines.length > 0 ? presData.medicines : [{ name: "", consumptionDays: "", times: { morning: false, evening: false, night: false }, instruction: "" }];
-        setMedicines(loadedMedicines);
-        setShowMedicineDetails(presData.medicines && presData.medicines.length > 0);
+        setValue("known_case_of", presData.known_case_of || "");
+        setValue("treatment", presData.treatment || "");
+        setValue("past_history", presData.past_history || "");
+        setValue("follow_up", presData.follow_up || "");
       } else {
         setCurrentPrescription(null); reset();
-        setMedicines([{ name: "", consumptionDays: "", times: { morning: false, evening: false, night: false }, instruction: "" }]);
-        setShowMedicineDetails(false);
       }
     } catch (error) { toast.error("An unexpected error occurred."); router.push("/opd/list/opdlistprescripitono"); }
     finally { setIsLoading(false); }
@@ -283,68 +224,55 @@ export default function OPDPrescriptionPage() {
 
   // --- Real-time Subscription ---
   useEffect(() => {
-    // ... (This function remains unchanged)
     if (!opd_id) return;
     const channel = supabase.channel(`opd_prescription_opd_id_${opd_id}`).on("postgres_changes", { event: "*", schema: "public", table: "opd_prescriptions", filter: `opd_id=eq.${opd_id}`}, payload => { toast.info(`Prescription data updated.`); fetchPatientAndPrescriptionData(); }).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [opd_id, fetchPatientAndPrescriptionData]);
 
-  // --- Medicine Helper Functions ---
-  const toggleMedicineDetails = () => setShowMedicineDetails((prev) => !prev);
-  const addMedicine = () => {
-    setMedicines([...medicines, { name: "", consumptionDays: "", times: { morning: false, evening: false, night: false }, instruction: "" }]);
-    setActiveMedicineIndex(medicines.length);
-    toast.info("Added a new medicine entry.");
-  };
-  const handleRemoveMedicine = (index: number) => {
-    setMedicines((prev) => prev.filter((_, i) => i !== index));
-    if (activeMedicineIndex >= index) setActiveMedicineIndex(Math.max(0, activeMedicineIndex - 1));
-  };
-  const handleMedicineChange = (index: number, field: keyof MedicineEntry, value: any) => setMedicines((prev) => prev.map((med, i) => (i === index ? { ...med, [field]: value } : med)));
-  const handleTimeToggle = (index: number, time: keyof MedicineEntry["times"]) => setMedicines((prev) => prev.map((med, i) => (i === index ? { ...med, times: { ...med.times, [time]: !med.times[time] } } : med)));
+  // --- Helper Functions ---
   const clearPrescription = () => {
     reset();
-    setMedicines([{ name: "", consumptionDays: "", times: { morning: false, evening: false, night: false }, instruction: "" }]);
-    setShowMedicineDetails(false);
     resetTranscript();
     toast.info("Form cleared.");
   };
 
   // --- PDF & WhatsApp Functions ---
   const generatePDFBlob = useCallback(async (prescriptionData: OPDPrescriptionRow | null) => {
-      // ... (This function remains unchanged)
       const dataToUse = prescriptionData || currentPrescription;
       if (!prescriptionContentRef.current || !patientData || !dataToUse) return null;
+      
       const pdf = new jsPDF("p", "mm", "a4");
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const letterheadImage = "/letterhead.png";
+      
       const originalRefStyle = prescriptionContentRef.current.style.cssText;
       prescriptionContentRef.current.style.position = "static";
       prescriptionContentRef.current.style.background = `url(${letterheadImage}) no-repeat center top / contain`;
       prescriptionContentRef.current.style.color = "#000";
+      
       prescriptionContentRef.current.innerHTML = `
         <div style="display: flex; justify-content: space-between; margin-bottom: 8mm; border-bottom: 1px solid #ccc; padding-bottom: 2mm;">
           <div><p><strong>Name:</strong> ${patientData.name}</p><p><strong>UHID:</strong> ${patientData.uhid}</p><p><strong>OPD ID:</strong> ${dataToUse.opd_id}</p></div>
           <div style="text-align: right;"><p><strong>Date:</strong> ${format(parseISO(dataToUse.created_at), "MMM dd, yyyy")}</p><p><strong>Age:</strong> ${patientData.age} ${patientData.age_unit || ""}</p><p><strong>Gender:</strong> ${patientData.gender}</p></div>
         </div>
-        <div style="margin-bottom: 8mm;"><h3 style="font-size: 13pt; margin-bottom: 3mm; border-bottom: 1px dashed #ccc;">Medicines</h3>
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead><tr><th style="text-align: left;">Name</th><th>Days</th><th>Time</th><th style="text-align: left;">Instruction</th></tr></thead>
-            <tbody>
-              ${(dataToUse.medicines && dataToUse.medicines.length > 0) ? dataToUse.medicines.map(med => `<tr><td>${med.name}</td><td style="text-align: center;">${med.consumptionDays}</td><td style="text-align: center;">${(med.times.morning ? "M " : "") + (med.times.evening ? "E " : "") + (med.times.night ? "N" : "")}</td><td>${med.instruction}</td></tr>`).join("") : `<tr><td colspan="4" style="text-align: center;">No medicines.</td></tr>`}
-            </tbody>
-          </table>
-        </div>
-        <div><h3 style="font-size: 13pt; border-bottom: 1px dashed #ccc;">Symptoms/Disease</h3><p>${dataToUse.symptoms || "N/A"}</p></div>
-        <div style="margin-top: 8mm;"><h3 style="font-size: 13pt; border-bottom: 1px dashed #ccc;">Overall Instructions</h3><p>${dataToUse.overall_instruction || "N/A"}</p></div>`;
+        <div style="margin-bottom: 5mm;"><h3 style="font-size: 13pt; margin-bottom: 1mm; border-bottom: 1px dashed #ccc;">Clinical Symptoms</h3><p>${dataToUse.symptoms || "N/A"}</p></div>
+        <div style="margin-bottom: 5mm;"><h3 style="font-size: 13pt; margin-bottom: 1mm; border-bottom: 1px dashed #ccc;">Known Case of/History</h3><p>${dataToUse.known_case_of || "N/A"}</p></div>
+        <div style="margin-bottom: 5mm;"><h3 style="font-size: 13pt; margin-bottom: 1mm; border-bottom: 1px dashed #ccc;">Treatment</h3><p>${dataToUse.treatment || "N/A"}</p></div>
+        <div style="margin-bottom: 5mm;"><h3 style="font-size: 13pt; margin-bottom: 1mm; border-bottom: 1px dashed #ccc;">Past History</h3><p>${dataToUse.past_history || "N/A"}</p></div>
+        <div style="margin-bottom: 5mm;"><h3 style="font-size: 13pt; margin-bottom: 1mm; border-bottom: 1px dashed #ccc;">Follow-up</h3><p>${dataToUse.follow_up || "N/A"}</p></div>
+      `;
+      
       const canvas = await html2canvas(prescriptionContentRef.current, { scale: 2 });
       pdf.addImage(canvas.toDataURL("image/jpeg", 1.0), "JPEG", 0, 0, pdfWidth, canvas.height * pdfWidth / canvas.width);
-      if (prescriptionContentRef.current) { prescriptionContentRef.current.style.cssText = originalRefStyle; prescriptionContentRef.current.innerHTML = ''; }
+      
+      if (prescriptionContentRef.current) { 
+        prescriptionContentRef.current.style.cssText = originalRefStyle; 
+        prescriptionContentRef.current.innerHTML = ''; 
+      }
       return pdf.output("blob");
   }, [patientData, currentPrescription]);
 
   const downloadPrescription = async () => {
-      // ... (This function remains unchanged)
       const pdfBlob = await generatePDFBlob(currentPrescription);
       if (!pdfBlob) { toast.error("Failed to generate PDF."); return; }
       const blobURL = URL.createObjectURL(pdfBlob);
@@ -353,7 +281,6 @@ export default function OPDPrescriptionPage() {
   };
   
   const uploadPdfAndSendWhatsApp = async () => {
-      // ... (This function remains unchanged)
       if (!currentPrescription || !patientData?.number) { toast.error(!patientData?.number ? "Patient phone number missing." : "Prescription data not loaded."); return; }
       setIsSendingWhatsApp(true);
       try {
@@ -375,7 +302,6 @@ export default function OPDPrescriptionPage() {
   };
   
   const viewHistoryPrescription = async (historyItem: OPDPrescriptionRow) => {
-      // ... (This function remains unchanged)
       const pdfBlob = await generatePDFBlob(historyItem);
       if (!pdfBlob) { toast.error("Failed to generate historical PDF."); return; }
       window.open(URL.createObjectURL(pdfBlob), "_blank");
@@ -383,12 +309,11 @@ export default function OPDPrescriptionPage() {
   
   // --- History Fetching ---
   const fetchPreviousPrescriptions = useCallback(async () => {
-    // ... (This function remains unchanged)
     if (!patientData?.uhid) return;
     try {
       const { data, error } = await supabase.from("opd_prescriptions").select("*").eq("uhid", patientData.uhid).order("created_at", { ascending: false });
       if (error) throw error;
-      setHistoryModalItems(data.filter((item) => item.id !== currentPrescription?.id));
+      setHistoryModalItems(data.filter((item) => item.opd_id !== currentPrescription?.opd_id));
     } catch { toast.error("Failed to load history."); }
   }, [patientData, currentPrescription]);
 
@@ -420,55 +345,74 @@ export default function OPDPrescriptionPage() {
             {listening && <div className="mb-3 p-2 bg-blue-50 border rounded-md text-sm italic">Listening: {transcript || "..."}</div>}
             
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              {/* Symptoms Input */}
+              {/* Clinical Symptoms Input */}
               <div>
-                <label htmlFor="symptoms" className="block text-sm font-medium">Symptoms/Disease</label>
-                <Textarea id="symptoms" {...register("symptoms", { required: true })} placeholder="Enter symptoms or say 'disease [name]'" />
+                <label htmlFor="symptoms" className="block text-sm font-medium">1. Clinical Symptoms</label>
+                <Textarea id="symptoms" {...register("symptoms")} placeholder="Enter symptoms or say 'clinical symptoms [content]'" />
+              </div>
+
+              {/* Known Case of/History Input */}
+              <div>
+                <label htmlFor="known_case_of" className="block text-sm font-medium">2. Known Case of/History</label>
+                <Textarea id="known_case_of" {...register("known_case_of")} placeholder="Enter known cases or say 'known case of [content]'" />
+              </div>
+
+              {/* Treatment Input */}
+              <div>
+                <label htmlFor="treatment" className="block text-sm font-medium">3. Treatment</label>
+                <Textarea id="treatment" {...register("treatment")} placeholder="Enter treatment or say 'treatment [content]'" />
+              </div>
+
+              {/* Past History Input */}
+              <div>
+                <label htmlFor="past_history" className="block text-sm font-medium">4. Past History</label>
+                <Textarea id="past_history" {...register("past_history")} placeholder="Enter past history or say 'past history [content]'" />
+              </div>
+              
+              {/* Follow-up Input */}
+              <div>
+                <label htmlFor="follow_up" className="block text-sm font-medium">5. Follow-up</label>
+                <Textarea id="follow_up" {...register("follow_up")} placeholder="Enter follow-up details or say 'follow up [content]'" />
               </div>
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-2">
-                <Button type="button" onClick={toggleMedicineDetails} variant="outline" className="flex-1"><PlusCircle className="mr-2" />{showMedicineDetails ? "Hide Medicines" : "Add Medicines"}</Button>
+                <Button type="submit" disabled={isSubmitting} className="flex-1 bg-green-600 hover:bg-green-700">
+                  {isSubmitting ? <><RefreshCw className="mr-2 animate-spin"/>Saving...</> : <><UserCheck className="mr-2"/>Save</>}
+                </Button>
+                <Button type="button" onClick={clearPrescription} variant="outline" className="flex-1 text-red-600 border-red-300 hover:bg-red-50">
+                  <Trash2 className="mr-2"/>Clear
+                </Button>
                 <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
-                  <DialogTrigger asChild><Button variant="outline" className="flex-1"><History className="mr-2" /> View History</Button></DialogTrigger>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" className="flex-1"><History className="mr-2" /> View History</Button>
+                  </DialogTrigger>
                   <DialogContent className="sm:max-w-[900px]">
-                      {/* History Modal Content is unchanged */}
+                    <DialogHeader>
+                      <DialogTitle>Previous Prescriptions for {patientData.name}</DialogTitle>
+                      <DialogDescription>
+                        This is a history of prescriptions for this patient.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {historyModalItems.length > 0 ? (
+                      <div className="overflow-auto max-h-[60vh]">
+                        <Table>
+                          <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Symptoms</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+                          <TableBody>{historyModalItems.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell>{format(parseISO(item.created_at), "MMM dd, yyyy")}</TableCell>
+                                <TableCell className="whitespace-normal max-w-[200px] overflow-hidden text-ellipsis">{item.symptoms}</TableCell>
+                                <TableCell><Button size="sm" onClick={() => viewHistoryPrescription(item)}><Eye className="h-4 w-4 mr-1" /> View PDF</Button></TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    ) : (
+                      <p className="text-center text-gray-500">No previous prescriptions found.</p>
+                    )}
                   </DialogContent>
                 </Dialog>
-              </div>
-
-              {/* Medicine Details Section */}
-              {showMedicineDetails && (
-                <div className="space-y-3 border p-3 rounded-md bg-gray-50">
-                  <h3 className="text-lg font-semibold">Medicines</h3>
-                  {medicines.map((medicine, index) => (
-                    <Card key={index} className={`p-3 ${activeMedicineIndex === index && listening ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setActiveMedicineIndex(index)}>
-                      <div className="flex justify-between items-center mb-2">
-                        <h4 className="font-semibold">Medicine {index + 1}</h4>
-                        <Button type="button" variant="destructive" size="sm" onClick={() => handleRemoveMedicine(index)}><Trash2 className="h-4 w-4" /></Button>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div><label className="text-xs">Name</label><Input value={medicine.name} onChange={(e) => handleMedicineChange(index, "name", e.target.value)} /></div>
-                        <div><label className="text-xs">Days</label><Input value={medicine.consumptionDays} onChange={(e) => handleMedicineChange(index, "consumptionDays", e.target.value)} /></div>
-                        <div className="sm:col-span-2"><label className="text-xs">Times</label><div className="flex gap-2 mt-1"><Button type="button" size="sm" variant={medicine.times.morning ? "default" : "outline"} onClick={() => handleTimeToggle(index, "morning")}>Morning</Button><Button type="button" size="sm" variant={medicine.times.evening ? "default" : "outline"} onClick={() => handleTimeToggle(index, "evening")}>Evening</Button><Button type="button" size="sm" variant={medicine.times.night ? "default" : "outline"} onClick={() => handleTimeToggle(index, "night")}>Night</Button></div></div>
-                        <div className="sm:col-span-2"><label className="text-xs">Instruction</label><Textarea value={medicine.instruction} onChange={(e) => handleMedicineChange(index, "instruction", e.target.value)} rows={1} /></div>
-                      </div>
-                    </Card>
-                  ))}
-                  <Button type="button" onClick={addMedicine} variant="outline" className="w-full"><PlusCircle className="mr-2" /> Add More Medicine</Button>
-                </div>
-              )}
-
-              {/* Overall Instructions Input */}
-              <div>
-                <label htmlFor="overallInstruction" className="block text-sm font-medium">Overall Instructions</label>
-                <Textarea id="overallInstruction" {...register("overallInstruction")} placeholder="Any additional notes..." />
-              </div>
-
-              {/* Submission & Utility Buttons */}
-              <div className="grid grid-cols-2 gap-2">
-                <Button type="submit" disabled={isSubmitting} className="bg-green-600 hover:bg-green-700">{isSubmitting ? <><RefreshCw className="mr-2 animate-spin"/>Saving...</> : <><UserCheck className="mr-2"/>Save</>}</Button>
-                <Button type="button" onClick={clearPrescription} variant="outline" className="text-red-600 border-red-300 hover:bg-red-50"><Trash2 className="mr-2"/>Clear</Button>
               </div>
 
               {currentPrescription && (
