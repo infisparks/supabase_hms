@@ -10,7 +10,7 @@ import {
   Home,
   XCircle,
   CheckCircle,
-  FileText,
+  FileText, // Changed icon for IPD Record
   Clipboard,
   Stethoscope,
   RefreshCw,
@@ -335,10 +335,13 @@ export default function IPDManagementPage() {
     toast.info(`Navigating to Manage page for: ${record.name} (IPD ID: ${record.ipdId})`);
   }, [router])
 
-  const handleDrugChart = useCallback((e: React.MouseEvent, record: BillingRecord) => {
-    e.stopPropagation()
-    toast.info(`Drug Chart for: ${record.name} (UHID: ${record.uhid}) - Not yet implemented`)
-  }, [])
+  // Renamed and updated from handleDrugChart to handleIPDRecord
+  const handleIPDRecord = useCallback((e: React.MouseEvent, record: BillingRecord) => {
+    e.stopPropagation();
+    router.push(`/ipdrecord/${record.ipdId}`); // Navigate to the new IPD record page
+    toast.info(`Navigating to IPD Record for: ${record.name} (IPD ID: ${record.ipdId})`);
+  }, [router]);
+
   // Modified handler for OT form navigation
   const handleOTForm = useCallback((e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
@@ -416,7 +419,7 @@ export default function IPDManagementPage() {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="container mx-auto px-4 py-8">
           {/* Header */}
-        
+          
           {/* Banner Image */}
           <div className="mb-8 flex justify-center">
             <Image
@@ -590,7 +593,7 @@ export default function IPDManagementPage() {
                     handleRowClick,
                     handleEditRecord,
                     handleManagePatient,
-                    handleDrugChart,
+                    handleIPDRecord, // Updated function call
                     handleOTForm,
                     handleDeleteRecord,
                     isLoading,
@@ -603,7 +606,7 @@ export default function IPDManagementPage() {
                     handleRowClick,
                     handleEditRecord,
                     handleManagePatient,
-                    handleDrugChart,
+                    handleIPDRecord, // Updated function call
                     handleOTForm,
                     handleDeleteRecord,
                     isLoading,
@@ -616,7 +619,7 @@ export default function IPDManagementPage() {
                     handleRowClick,
                     handleEditRecord,
                     handleManagePatient,
-                    handleDrugChart,
+                    handleIPDRecord, // Updated function call
                     handleOTForm,
                     handleDeleteRecord,
                     isLoading,
@@ -636,7 +639,7 @@ function renderPatientsTable(
   handleRowClick: (record: BillingRecord) => void,
   handleEditRecord: (e: React.MouseEvent, record: BillingRecord) => void,
   handleManagePatient: (e: React.MouseEvent, record: BillingRecord) => void,
-  handleDrugChart: (e: React.MouseEvent, record: BillingRecord) => void,
+  handleIPDRecord: (e: React.MouseEvent, record: BillingRecord) => void, // Updated function name
   handleOTForm: (e: React.MouseEvent, record: BillingRecord) => void,
   handleDeleteRecord: (record: BillingRecord) => void,
   isLoading: boolean,
@@ -742,11 +745,11 @@ function renderPatientsTable(
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={(e) => handleDrugChart(e, record)}
+                    onClick={(e) => handleIPDRecord(e, record)} // Updated function call
                     className="text-slate-700 hover:bg-slate-100 border-slate-200 whitespace-nowrap"
                   >
                     <Clipboard className="h-4 w-4 mr-1" />
-                    Drug Chart
+                    IPD Record
                   </Button>
                   <Button
                     variant="outline"
@@ -773,7 +776,7 @@ function renderPatientsTable(
                       <AlertDialogHeader>
                         <AlertDialogTitle>Delete IPD Record</AlertDialogTitle>
                         <AlertDialogDescription>
-                          Are you sure you want to delete the IPD record for {record.name} (UHID: {record.uhid})? 
+                          Are you sure you want to delete the IPD record for {record.name} (UHID: {record.uhid})?  
                           This action will also make the bed available again. This action cannot be undone.
                         </AlertDialogDescription>
                       </AlertDialogHeader>

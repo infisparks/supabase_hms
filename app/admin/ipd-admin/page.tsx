@@ -627,70 +627,114 @@ export default function IPDAdminPage() {
 
   const handleExportExcel = useCallback(() => {
     if (filteredPatients.length === 0) {
-      toast.info("No patients to export.")
-      return
+      toast.info("No patients to export.");
+      return;
     }
 
-    const dataToExport = filteredPatients.map((patient) => {
+    const dataToExport: any[] = [];
+
+    filteredPatients.forEach((patient) => {
       const dischargeType = getDischargeType(patient.discharge_summaries);
-      const dischargeStatus = getDischargeStatus(patient.discharge_date, patient.bed_management?.status, dischargeType);
+      const dischargeDate = patient.discharge_date ? format(parseISO(patient.discharge_date), "dd-MM-yy") : "N/A";
 
-      // Calculate Reg, Bed/Nursing, and Dr Visit amounts
-      let regAmount = 0;
-      let bedNursingAmount = 0;
-      let drVisitAmount = 0;
-      const consultantNames: string[] = [];
+      const services = patient.service_detail || [];
 
-      (patient.service_detail || []).forEach((service) => {
-        if (service.serviceName.toLowerCase().includes("registration charges")) {
-          regAmount += service.amount;
-        }
-        if (service.serviceName.toLowerCase().includes("bed / nursing")) {
-          bedNursingAmount += service.amount;
-        }
-        if (service.type === "doctorvisit" && service.doctorName) {
-          drVisitAmount += service.amount;
-          if (!consultantNames.includes(service.doctorName)) {
-            consultantNames.push(service.doctorName);
-          }
-        }
-      });
+      // Separate services by type
+      const regService = services.find((s) => s.serviceName.toLowerCase().includes("registration charges"));
+      const bedNursingService = services.find((s) => s.serviceName.toLowerCase().includes("bed / nursing"));
+      const hospitalServices = services.filter((s) => s.serviceName.toLowerCase().includes("hospital services"));
+      const medicinesService = services.find((s) => s.serviceName.toLowerCase().includes("medicines"));
+      const pathologyService = services.find((s) => s.serviceName.toLowerCase().includes("patho"));
 
-      return {
-        "MRD #": patient.mrd || "N/A",
-        "Bill no.": patient.ipd_id,
-        "DOD": patient.discharge_date ? format(parseISO(patient.discharge_date), "dd-MM-yy") : "N/A",
-        "Pt Name": patient.patient_detail?.name || "Unknown",
-        "Consultant": consultantNames.join(", ") || "N/A",
-        "Type": "", // Keep empty as requested
-        "Ref by": patient.admission_source || "", // Display admission_source or empty string
-        "Reg": regAmount > 0 ? regAmount : "",
-        "Bed/Nursing": bedNursingAmount > 0 ? bedNursingAmount : "",
-        "Dr Visit": drVisitAmount > 0 ? drVisitAmount : "",
-        "Hospital Services": "", // Keep empty as requested
-        "Patho": "", // Keep empty as requested
-        "Medicines": "", // Keep empty as requested
-        "Total Bill Amt": patient.totalGrossBill,
-        "Final Bill Rcvd": patient.totalPaidAmount,
-        "Discount": patient.totalDiscountAmount,
+      const consultants = services.filter((s) => s.type === "doctorvisit" && s.doctorName);
+      
+      // Get unique consultants
+      const uniqueConsultants = consultants.reduce((acc, current) => {
+        const x = acc.find(item => item.doctorName === current.doctorName);
+        if (!x) {
+          return acc.concat([current]);
+        } else {
+          return acc;
+        }
+      }, [] as IPDService[]);
+
+      // If there are no consultants, export a single row with aggregated data
+      if (uniqueConsultants.length === 0) {
+        dataToExport.push({
+          "MRD #": patient.mrd || "N/A",
+          "Bill no.": `MF/07/${String(patient.ipd_id).padStart(5, '0')}`,
+          "DOD": dischargeDate,
+          "Pt Name": patient.patient_detail?.name || "Unknown",
+          "Consultant": "", // Consultant is N/A for this row
+          "Type": "",
+          "Ref by": patient.admission_source || "",
+          "Reg": regService?.amount || "",
+          "Bed/Nursing": bedNursingService?.amount || "",
+          "Dr Visit": "",
+          "Hospital Services": hospitalServices.reduce((sum, s) => sum + s.amount, 0),
+          "Patho": pathologyService?.amount || "",
+          "Medicines": medicinesService?.amount || "",
+          "Total Bill Amt": patient.totalGrossBill,
+          "Final Bill Rcvd": patient.totalPaidAmount,
+          "Discount": patient.totalDiscountAmount,
+        });
+      } else {
+        // Create a separate row for each consultant
+        uniqueConsultants.forEach((consultant, index) => {
+          const consultantVisits = consultants.filter(c => c.doctorName === consultant.doctorName);
+          const totalConsultantCharge = consultantVisits.reduce((sum, visit) => sum + visit.amount, 0);
+
+          // Use the total for the first consultant's row, and an empty string for the rest
+          const billNo = index === 0 ? `MF/07/${String(patient.ipd_id).padStart(5, '0')}` : "";
+          const ptName = index === 0 ? patient.patient_detail?.name || "Unknown" : "";
+          const dod = index === 0 ? dischargeDate : "";
+          const refBy = index === 0 ? patient.admission_source || "" : "";
+          const regAmount = index === 0 ? (regService?.amount || "") : "";
+          const bedNursingAmount = index === 0 ? (bedNursingService?.amount || "") : "";
+          const hospitalServicesAmount = index === 0 ? hospitalServices.reduce((sum, s) => sum + s.amount, 0) : "";
+          const medicinesAmount = index === 0 ? (medicinesService?.amount || "") : "";
+          const pathologyAmount = index === 0 ? (pathologyService?.amount || "") : "";
+          const totalBillAmt = index === 0 ? patient.totalGrossBill : "";
+          const finalBillRcvd = index === 0 ? patient.totalPaidAmount : "";
+          const discount = index === 0 ? patient.totalDiscountAmount : "";
+
+          dataToExport.push({
+            "MRD #": patient.mrd || "N/A",
+            "Bill no.": billNo,
+            "DOD": dod,
+            "Pt Name": ptName,
+            "Consultant": consultant.doctorName,
+            "Type": consultant.serviceName, // Changed 'Type' to serviceName as per image
+            "Ref by": refBy,
+            "Reg": regAmount,
+            "Bed/Nursing": bedNursingAmount,
+            "Dr Visit": totalConsultantCharge,
+            "Hospital Services": hospitalServicesAmount,
+            "Patho": pathologyAmount,
+            "Medicines": medicinesAmount,
+            "Total Bill Amt": totalBillAmt,
+            "Final Bill Rcvd": finalBillRcvd,
+            "Discount": discount,
+          });
+        });
       }
-    })
+    });
 
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, "IPD Patients")
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "IPD Patients");
 
-    let filename = "IPD_Patients"
+    let filename = "IPD_Patients";
     if (filterStartDate && filterEndDate) {
-      filename += `_Custom_${format(parseISO(filterStartDate), "yyyyMMdd")}_to_${format(parseISO(filterEndDate), "yyyyMMdd")}`
+      filename += `_Custom_${format(parseISO(filterStartDate), "yyyyMMdd")}_to_${format(parseISO(filterEndDate), "yyyyMMdd")}`;
     } else if (dischargeStatusFilter) {
-      filename += `_${dischargeStatusFilter}`
+      filename += `_${dischargeStatusFilter}`;
     }
-    filename += ".xlsx"
+    filename += ".xlsx";
 
-    XLSX.writeFile(workbook, filename)
-    toast.success("IPD data exported successfully!")
-  }, [filteredPatients, filterStartDate, filterEndDate, dischargeStatusFilter, getDischargeType, getDischargeStatus])
+    XLSX.writeFile(workbook, filename);
+    toast.success("IPD data exported successfully!");
+  }, [filteredPatients, filterStartDate, filterEndDate, dischargeStatusFilter, getDischargeType]);
 
   // Handles opening the patient history modal and fetching detailed data
   const handleViewPatientHistory = useCallback(async (ipdId: number) => {
@@ -1159,9 +1203,9 @@ export default function IPDAdminPage() {
                 {dischargeStatusFilter && (
                   <span className="ml-2 text-gray-500">
                     (Filtered by: {dischargeStatusFilter === "admitted" ? "Currently Admitted" : 
-                                   dischargeStatusFilter === "discharged" ? "Fully Discharged" : 
-                                   dischargeStatusFilter === "partially" ? "Partially Discharged" :
-                                   dischargeStatusFilter === "death" ? "Death Cases" : "Unknown"})
+                                       dischargeStatusFilter === "discharged" ? "Fully Discharged" : 
+                                       dischargeStatusFilter === "partially" ? "Partially Discharged" :
+                                       dischargeStatusFilter === "death" ? "Death Cases" : "Unknown"})
                   </span>
                 )}
               </div>
@@ -1232,7 +1276,7 @@ export default function IPDAdminPage() {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredPatients.map((patient) => {
                       const dischargeType = getDischargeType(patient.discharge_summaries);
-        const dischargeStatus = getDischargeStatus(patient.discharge_date, patient.bed_management?.status, dischargeType)
+                      const dischargeStatus = getDischargeStatus(patient.discharge_date, patient.bed_management?.status, dischargeType)
                       return (
                         <tr key={patient.ipd_id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -1448,22 +1492,22 @@ export default function IPDAdminPage() {
                       </div>
                       {(selectedPatientForHistory.totalRefundedAmount > 0 || selectedPatientForHistory.totalDiscountAmount > 0) && (
                         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                           {selectedPatientForHistory.totalRefundedAmount > 0 && (
+                            {selectedPatientForHistory.totalRefundedAmount > 0 && (
                             <div className="bg-yellow-50 rounded-lg p-4">
                                 <p className="text-sm text-yellow-600">Total Refunds</p>
                                 <p className="text-xl font-bold text-yellow-800">
                                     ₹{selectedPatientForHistory.totalRefundedAmount.toLocaleString()}
                                 </p>
                             </div>
-                           )}
-                           {selectedPatientForHistory.totalDiscountAmount > 0 && (
+                            )}
+                            {selectedPatientForHistory.totalDiscountAmount > 0 && (
                             <div className="bg-purple-50 rounded-lg p-4">
                                 <p className="text-sm text-purple-600">Total Discount</p>
                                 <p className="text-xl font-bold text-purple-800">
                                     ₹{selectedPatientForHistory.totalDiscountAmount.toLocaleString()}
                                 </p>
                             </div>
-                           )}
+                            )}
                         </div>
                       )}
                     </div>
