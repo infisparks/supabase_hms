@@ -1,4 +1,3 @@
-// Filename: drug-chart.tsx
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -21,8 +20,18 @@ interface DrugChartRow {
   remarks: string;
 }
 
+interface DrugChartHeader {
+    allergy: string;
+    diagnosis: string;
+    bloodProduct: string;
+    nutrition: string;
+    chartFilledBySign: string; // Will hold PIN or signature URL
+    chartAuditedBySign: string; // Will hold PIN or signature URL
+    consultantSign: string; // Will hold PIN or signature URL
+}
+
 // --- Helper Function to Create Initial State ---
-const createInitialData = (count: number = 26): DrugChartRow[] => {
+const createInitialData = (count: number = 2): DrugChartRow[] => {
   const hourlyTimes = ['12am', '2am', '4am', '6am', '8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm', '10pm'];
   const initialHourly = hourlyTimes.reduce((acc, time) => ({ ...acc, [time]: '' }), {});
   return Array.from({ length: count }, (_, i) => ({
@@ -39,17 +48,23 @@ const createInitialData = (count: number = 26): DrugChartRow[] => {
   }));
 };
 
-// --- Main Drug Chart Component ---
-const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
-  const [rows, setRows] = useState<DrugChartRow[]>(createInitialData());
-  const [headerInfo, setHeaderInfo] = useState({
+const initialHeaderInfo: DrugChartHeader = {
     allergy: '',
     diagnosis: '',
     bloodProduct: '',
-    nutrition: ''
-  });
+    nutrition: '',
+    chartFilledBySign: '',
+    chartAuditedBySign: '',
+    consultantSign: ''
+};
+
+// --- Main Drug Chart Component ---
+const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
+  const [rows, setRows] = useState<DrugChartRow[]>(createInitialData());
+  const [headerInfo, setHeaderInfo] = useState<DrugChartHeader>(initialHeaderInfo);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [verifyingSignature, setVerifyingSignature] = useState<string | null>(null);
 
   // --- Data Fetching Function ---
   const fetchDrugChartData = useCallback(async () => {
@@ -64,7 +79,7 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
       if (error && error.code !== 'PGRST116') throw error;
 
       if (data) {
-        if (data.drug_chart_data) {
+        if (data.drug_chart_data && Array.isArray(data.drug_chart_data) && data.drug_chart_data.length > 0) {
           setRows(data.drug_chart_data as DrugChartRow[]);
         }
         if (data.drug_chart_header) {
@@ -80,19 +95,8 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
     }
   }, [ipdId]);
   
-  // --- Authentication and Data Fetching Effect ---
   useEffect(() => {
-    const checkAuthAndFetch = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session && ipdId) {
-        fetchDrugChartData();
-      } else {
-        setIsLoading(false);
-        toast.error("User not authenticated. Please log in.");
-      }
-    };
-    
-    checkAuthAndFetch();
+    if (ipdId) fetchDrugChartData();
   }, [ipdId, fetchDrugChartData]);
 
   // --- Data Saving Function ---
@@ -106,11 +110,20 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
         return;
       }
 
+      // Clear unsaved PINs from header before saving
+      const headerToSave = { ...headerInfo };
+      const signatureFields: (keyof DrugChartHeader)[] = ['chartFilledBySign', 'chartAuditedBySign', 'consultantSign'];
+      signatureFields.forEach(field => {
+          if (headerToSave[field].length === 10 && !headerToSave[field].startsWith('http')) {
+              headerToSave[field] = '';
+          }
+      });
+
       const { error } = await supabase.from('ipd_record').upsert({
         ipd_id: ipdId,
         user_id: session.user.id,
         drug_chart_data: rows,
-        drug_chart_header: headerInfo,
+        drug_chart_header: headerToSave,
       }, { onConflict: 'ipd_id,user_id' });
 
       if (error) throw error;
@@ -123,6 +136,34 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
     }
   };
 
+  // --- Signature Verification ---
+  const checkAndSetSignature = useCallback(async (password: string, field: keyof DrugChartHeader) => {
+      if (password.length !== 10) return;
+      setVerifyingSignature(field);
+      try {
+          const { data, error } = await supabase
+              .from('signature')
+              .select('signature_url')
+              .eq('password', password)
+              .single();
+
+          if (error && error.code !== 'PGRST116') throw error;
+
+          if (data?.signature_url) {
+              setHeaderInfo(prev => ({ ...prev, [field]: data.signature_url }));
+              toast.success(`Signature verified successfully.`);
+          } else {
+              toast.error(`Invalid signature PIN.`);
+          }
+      } catch (error) {
+          console.error("Error verifying signature:", error);
+          toast.error("Could not verify signature.");
+      } finally {
+          setVerifyingSignature(null);
+      }
+  }, []);
+
+
   // --- Input Change Handlers ---
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>, index: number, field: keyof DrugChartRow) => {
     const { value } = e.target;
@@ -133,9 +174,21 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
     );
   };
 
-  const handleHeaderChange = (e: React.ChangeEvent<HTMLInputElement>, field: keyof typeof headerInfo) => {
+  const handleHeaderChange = (e: React.ChangeEvent<HTMLInputElement>, field: keyof DrugChartHeader) => {
     const { value } = e.target;
     setHeaderInfo(prev => ({ ...prev, [field]: value }));
+
+    const signatureFields: (keyof DrugChartHeader)[] = ['chartFilledBySign', 'chartAuditedBySign', 'consultantSign'];
+    if(signatureFields.includes(field) && value.length === 10) {
+        checkAndSetSignature(value, field);
+    }
+  };
+
+  const handleSignatureReset = (field: keyof DrugChartHeader) => {
+      if(window.confirm("Are you sure you want to remove this signature?")) {
+          setHeaderInfo(prev => ({ ...prev, [field]: '' }));
+          toast.info("Signature has been cleared.");
+      }
   };
 
   const handleHourlyChange = (e: React.ChangeEvent<HTMLInputElement>, index: number, time: string) => {
@@ -173,6 +226,36 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
       toast.info("At least one row is required.");
     }
   };
+
+  // --- Signature Renderer ---
+  const renderSignatureArea = (field: keyof DrugChartHeader, label: string) => (
+      <div className="text-center">
+          {label}:
+          <div className="border-t border-gray-400 pt-2 mt-2 h-16 flex items-center justify-center">
+              {verifyingSignature === field ? (
+                  <RefreshCw className="h-6 w-6 animate-spin text-blue-500" />
+              ) : headerInfo[field].startsWith('http') ? (
+                  <img
+                      src={headerInfo[field]}
+                      alt="Signature"
+                      title="Click to remove signature"
+                      className="h-12 object-contain cursor-pointer"
+                      onClick={() => handleSignatureReset(field)}
+                  />
+              ) : (
+                  <input
+                      type="password"
+                      value={headerInfo[field]}
+                      onChange={(e) => handleHeaderChange(e, field)}
+                      maxLength={10}
+                      placeholder="Enter PIN"
+                      className="text-center w-full focus:outline-none bg-transparent"
+                      autoComplete="new-password"
+                  />
+              )}
+          </div>
+      </div>
+  );
 
   if (isLoading) {
     return (
@@ -231,25 +314,25 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
         {/* Table Body */}
         <div>
           {rows.map((row, index) => (
-            <div key={index} className={`grid ${gridColumnsClass} text-xs text-center border-t border-gray-400`}>
-              <div className="p-1 border-r border-gray-400 bg-gray-50">{row.srNo}</div>
-              <input type="text" value={row.duration} onChange={(e) => handleInputChange(e, index, 'duration')} className="p-1 border-r border-gray-400 focus:outline-none" />
-              <input type="text" value={row.dosage} onChange={(e) => handleInputChange(e, index, 'dosage')} className="p-1 border-r border-gray-400 focus:outline-none" />
-              <input type="text" value={row.drugName} onChange={(e) => handleInputChange(e, index, 'drugName')} className="p-1 border-r border-gray-400 focus:outline-none" />
-              <input type="text" value={row.route} onChange={(e) => handleInputChange(e, index, 'route')} className="p-1 border-r border-gray-400 focus:outline-none" />
-              <input type="text" value={row.frequency} onChange={(e) => handleInputChange(e, index, 'frequency')} className="p-1 border-r border-gray-400 focus:outline-none" />
-              <input type="text" value={row.instructions} onChange={(e) => handleInputChange(e, index, 'instructions')} className="p-1 border-r border-gray-400 focus:outline-none" />
-              <input type="text" value={row.stat} onChange={(e) => handleInputChange(e, index, 'stat')} className="p-1 border-r border-gray-400 focus:outline-none" />
+            <div key={index} className={`grid ${gridColumnsClass} text-xs text-center border-t border-gray-400 min-h-[30px]`}>
+              <div className="p-1 border-r border-gray-400 bg-gray-50 flex items-center justify-center">{row.srNo}</div>
+              <input type="text" value={row.duration} onChange={(e) => handleInputChange(e, index, 'duration')} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+              <input type="text" value={row.dosage} onChange={(e) => handleInputChange(e, index, 'dosage')} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+              <input type="text" value={row.drugName} onChange={(e) => handleInputChange(e, index, 'drugName')} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+              <input type="text" value={row.route} onChange={(e) => handleInputChange(e, index, 'route')} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+              <input type="text" value={row.frequency} onChange={(e) => handleInputChange(e, index, 'frequency')} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+              <input type="text" value={row.instructions} onChange={(e) => handleInputChange(e, index, 'instructions')} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+              <input type="text" value={row.stat} onChange={(e) => handleInputChange(e, index, 'stat')} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
               {hourlyTimes.map(time => (
                 <input
                   key={time}
                   type="text"
                   value={row.hourly[time.replace(/\s/g, '')] || ''}
                   onChange={(e) => handleHourlyChange(e, index, time.replace(/\s/g, ''))}
-                  className="p-1 border-r border-gray-400 focus:outline-none"
+                  className="p-1 border-r border-gray-400 focus:outline-none w-full"
                 />
               ))}
-              <input type="text" value={row.remarks} onChange={(e) => handleInputChange(e, index, 'remarks')} className="p-1 focus:outline-none" />
+              <input type="text" value={row.remarks} onChange={(e) => handleInputChange(e, index, 'remarks')} className="p-1 focus:outline-none w-full" />
             </div>
           ))}
         </div>
@@ -285,10 +368,11 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
         </CardContent>
       </Card>
       
+      {/* UPDATED: Signature Section */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mt-8 text-sm">
-        <div className="border-t border-gray-400 pt-2 text-center">Chart Filled By:</div>
-        <div className="border-t border-gray-400 pt-2 text-center">Chart Audited By:</div>
-        <div className="border-t border-gray-400 pt-2 text-center">Consultant Sign:</div>
+          {renderSignatureArea('chartFilledBySign', 'Chart Filled By')}
+          {renderSignatureArea('chartAuditedBySign', 'Chart Audited By')}
+          {renderSignatureArea('consultantSign', 'Consultant Sign')}
       </div>
 
     </div>

@@ -1,4 +1,3 @@
-// Filename: glucose-monitoring-sheet.tsx
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -16,11 +15,11 @@ interface GlucoseRow {
   dose: string;
   orderedBy: string;
   timeGiven: string;
-  signId: string;
+  signId: string; // Will hold PIN or signature URL
 }
 
-// --- Helper Function to Create Initial State ---
-const createInitialRows = (count: number = 20): GlucoseRow[] => {
+// --- UPDATED: Helper Function to Create Initial State (3 rows) ---
+const createInitialRows = (count: number = 3): GlucoseRow[] => {
   return Array.from({ length: count }, () => ({
     date: '', time: '', bloodSugar: '', urineKetone: '', medication: '',
     dose: '', orderedBy: '', timeGiven: '', signId: '',
@@ -32,6 +31,7 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
   const [rows, setRows] = useState<GlucoseRow[]>(createInitialRows());
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [verifyingSignature, setVerifyingSignature] = useState<number | null>(null);
 
   // --- Data Fetching Function ---
   const fetchGlucoseData = useCallback(async () => {
@@ -75,10 +75,18 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
         return;
       }
 
+      // Clear any unsaved PINs before saving
+      const rowsToSave = rows.map(row => {
+          if(row.signId.length === 10 && !row.signId.startsWith('http')) {
+              return { ...row, signId: '' };
+          }
+          return row;
+      });
+
       const { error } = await supabase.from('ipd_record').upsert({
           ipd_id: ipdId,
           user_id: session.user.id,
-          glucose_data: rows,
+          glucose_data: rowsToSave,
         }, { onConflict: 'ipd_id,user_id' });
 
       if (error) throw error;
@@ -91,10 +99,54 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
     }
   };
 
+  // --- Signature Verification Function ---
+  const checkAndSetSignature = useCallback(async (password: string, index: number) => {
+    if (password.length !== 10) return;
+    setVerifyingSignature(index);
+    try {
+      const { data, error } = await supabase
+        .from('signature')
+        .select('signature_url')
+        .eq('password', password)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') throw error;
+
+      if (data?.signature_url) {
+        setRows(prevRows => prevRows.map((row, i) =>
+          i === index ? { ...row, signId: data.signature_url } : row
+        ));
+        toast.success(`Signature verified for row ${index + 1}.`);
+      } else {
+        toast.error(`Invalid signature PIN for row ${index + 1}.`);
+      }
+    } catch (error) {
+      console.error("Error verifying signature:", error);
+      toast.error("Could not verify signature.");
+    } finally {
+        setVerifyingSignature(null);
+    }
+  }, []);
+
   // --- Input Change Handler ---
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>, index: number, field: keyof GlucoseRow) => {
     const { value } = e.target;
-    setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: value } : row));
+    const newRows = rows.map((row, i) => i === index ? { ...row, [field]: value } : row);
+    setRows(newRows);
+    
+    if (field === 'signId' && value.length === 10) {
+      checkAndSetSignature(value, index);
+    }
+  };
+
+  // --- Reset Signature with Confirmation ---
+  const handleSignatureReset = (index: number) => {
+    if (window.confirm("Are you sure you want to remove this signature?")) {
+      setRows(prevRows => prevRows.map((row, i) =>
+        i === index ? { ...row, signId: '' } : row
+      ));
+      toast.info(`Signature for row ${index + 1} has been cleared.`);
+    }
   };
 
   // --- Row Management Functions ---
@@ -145,7 +197,7 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
         {/* Table Body */}
         <div>
           {rows.map((row, index) => (
-            <div key={index} className={`grid ${gridColumnsClass} text-xs text-center border-t border-gray-400`}>
+            <div key={index} className={`grid ${gridColumnsClass} text-xs text-center border-t border-gray-400 min-h-[40px]`}>
               <input type="text" value={row.date} onChange={(e) => handleInputChange(e, index, 'date')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
               <input type="text" value={row.time} onChange={(e) => handleInputChange(e, index, 'time')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
               <input type="text" value={row.bloodSugar} onChange={(e) => handleInputChange(e, index, 'bloodSugar')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
@@ -154,7 +206,29 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
               <input type="text" value={row.dose} onChange={(e) => handleInputChange(e, index, 'dose')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
               <input type="text" value={row.orderedBy} onChange={(e) => handleInputChange(e, index, 'orderedBy')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
               <input type="text" value={row.timeGiven} onChange={(e) => handleInputChange(e, index, 'timeGiven')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
-              <input type="text" value={row.signId} onChange={(e) => handleInputChange(e, index, 'signId')} className="p-2 focus:outline-none w-full" />
+              <div className="flex items-center justify-center">
+                 {verifyingSignature === index ? (
+                    <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
+                 ) : row.signId.startsWith('http') ? (
+                    <img 
+                        src={row.signId} 
+                        alt="Signature"
+                        title="Click to clear signature"
+                        className="h-8 object-contain cursor-pointer p-1 hover:opacity-75"
+                        onClick={() => handleSignatureReset(index)}
+                    />
+                 ) : (
+                    <input
+                        type="password"
+                        value={row.signId}
+                        onChange={(e) => handleInputChange(e, index, 'signId')}
+                        className="p-2 focus:outline-none w-full text-center"
+                        maxLength={10}
+                        placeholder="PIN"
+                        autoComplete="new-password"
+                    />
+                 )}
+              </div>
             </div>
           ))}
         </div>

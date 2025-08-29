@@ -1,11 +1,9 @@
-// Filename: iv-infusion-sheet.tsx
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { RefreshCw, PlusCircle, MinusCircle } from 'lucide-react';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
 
 // --- Type Definitions ---
 interface IVInfusionRow {
@@ -16,12 +14,14 @@ interface IVInfusionRow {
   drugsAdded: string;
   dose: string;
   infusionRate: string;
-  drSign: string;
+  drSign: string;     // Will hold PIN or signature URL
   start: string;
   end: string;
-  given: string;
-  checked: string;
+  given: string;      // Will hold PIN or signature URL
+  checked: string;    // Will hold PIN or signature URL
 }
+
+type SignatureField = 'drSign' | 'given' | 'checked';
 
 // --- Helper Function to Create Initial State ---
 const createInitialData = (count: number = 10): IVInfusionRow[] => {
@@ -47,6 +47,7 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
   const [orderRows, setOrderRows] = useState<IVInfusionRow[]>(createInitialData(15));
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [verifyingSignature, setVerifyingSignature] = useState<{ table: 'stat' | 'order', index: number, field: SignatureField } | null>(null);
 
   // --- Data Fetching Function ---
   const fetchInfusionData = useCallback(async () => {
@@ -62,8 +63,8 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
 
       if (data?.iv_infusion_data) {
         const { stat_rows, order_rows } = data.iv_infusion_data as { stat_rows: IVInfusionRow[], order_rows: IVInfusionRow[] };
-        if (stat_rows) setStatRows(stat_rows);
-        if (order_rows) setOrderRows(order_rows);
+        if (stat_rows && stat_rows.length > 0) setStatRows(stat_rows);
+        if (order_rows && order_rows.length > 0) setOrderRows(order_rows);
         toast.success("Previous IV Infusion data loaded.");
       }
     } catch (error) {
@@ -78,9 +79,47 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
     if (ipdId) fetchInfusionData();
   }, [ipdId, fetchInfusionData]);
 
+  // --- Signature Verification ---
+  const checkAndSetSignature = useCallback(async (password: string, index: number, field: SignatureField, table: 'stat' | 'order') => {
+      if (password.length !== 10) return;
+      setVerifyingSignature({ table, index, field });
+      try {
+          const { data, error } = await supabase.from('signature').select('signature_url').eq('password', password).single();
+          if (error && error.code !== 'PGRST116') throw error;
+
+          if (data?.signature_url) {
+              const setRows = table === 'stat' ? setStatRows : setOrderRows;
+              setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: data.signature_url } : row));
+              toast.success(`Signature verified for row ${index + 1}.`);
+          } else {
+              toast.error(`Invalid PIN for row ${index + 1}.`);
+          }
+      } catch (error) {
+          console.error("Error verifying signature:", error);
+          toast.error("Could not verify signature.");
+      } finally {
+          setVerifyingSignature(null);
+      }
+  }, []);
+
   // --- Data Saving Function ---
   const handleSave = async () => {
     setIsSaving(true);
+    const signatureFields: SignatureField[] = ['drSign', 'given', 'checked'];
+    
+    // Function to clean unsaved PINs from rows
+    const cleanRows = (rows: IVInfusionRow[]) => {
+        return rows.map(row => {
+            const newRow = { ...row };
+            signatureFields.forEach(field => {
+                if (newRow[field] && newRow[field].length === 10 && !newRow[field].startsWith('http')) {
+                    newRow[field] = '';
+                }
+            });
+            return newRow;
+        });
+    };
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -92,7 +131,7 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
       const { error } = await supabase.from('ipd_record').upsert({
         ipd_id: ipdId,
         user_id: session.user.id,
-        iv_infusion_data: { stat_rows: statRows, order_rows: orderRows },
+        iv_infusion_data: { stat_rows: cleanRows(statRows), order_rows: cleanRows(orderRows) },
       }, { onConflict: 'ipd_id,user_id' });
 
       if (error) throw error;
@@ -113,11 +152,22 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
     table: 'stat' | 'order'
   ) => {
     const { value } = e.target;
-    if (table === 'stat') {
-      setStatRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: value } : row));
-    } else {
-      setOrderRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: value } : row));
+    const setRows = table === 'stat' ? setStatRows : setOrderRows;
+    const signatureFields: SignatureField[] = ['drSign', 'given', 'checked'];
+
+    setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: value } : row));
+
+    if (signatureFields.includes(field as SignatureField) && value.length === 10) {
+        checkAndSetSignature(value, index, field as SignatureField, table);
     }
+  };
+  
+  const handleSignatureReset = (index: number, field: SignatureField, table: 'stat' | 'order') => {
+      if (window.confirm("Are you sure you want to remove this signature?")) {
+          const setRows = table === 'stat' ? setStatRows : setOrderRows;
+          setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: '' } : row));
+          toast.info(`Signature for row ${index + 1} has been cleared.`);
+      }
   };
 
   // --- Row Management Functions ---
@@ -153,8 +203,31 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
     );
   }
   
-  // UPDATED: The table grid layout has been corrected for better alignment.
   const gridColumnsClass = "grid-cols-[40px_70px_1fr_60px_1fr_60px_1fr_80px_60px_60px_60px_60px]";
+
+  const renderSignatureCell = (row: IVInfusionRow, index: number, field: SignatureField, tableType: 'stat' | 'order') => (
+    <div className="flex items-center justify-center h-full">
+      {verifyingSignature?.table === tableType && verifyingSignature?.index === index && verifyingSignature?.field === field ? (
+        <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
+      ) : row[field].startsWith('http') ? (
+        <img 
+          src={row[field]} 
+          alt="Signature"
+          title="Click to remove signature"
+          className="h-6 object-contain cursor-pointer"
+          onClick={() => handleSignatureReset(index, field, tableType)}
+        />
+      ) : (
+        <input 
+          type="password"
+          value={row[field]}
+          onChange={(e) => handleInputChange(e, index, field, tableType)}
+          className="p-1 focus:outline-none w-full h-full text-center bg-transparent"
+          maxLength={10}
+        />
+      )}
+    </div>
+  );
 
   const renderTable = (rows: IVInfusionRow[], tableType: 'stat' | 'order') => (
     <div className="border border-gray-400 rounded-md overflow-hidden mb-8">
@@ -175,19 +248,19 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
       </div>
       <div>
         {rows.map((row, index) => (
-          <div key={index} className={`grid ${gridColumnsClass} text-xs text-center border-t border-gray-400`}>
-            <div className="p-1 border-r border-gray-400 bg-gray-50">{row.srNo}</div>
-            <input type="text" value={row.time} onChange={(e) => handleInputChange(e, index, 'time', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.ivFluids} onChange={(e) => handleInputChange(e, index, 'ivFluids', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.volume} onChange={(e) => handleInputChange(e, index, 'volume', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.drugsAdded} onChange={(e) => handleInputChange(e, index, 'drugsAdded', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.dose} onChange={(e) => handleInputChange(e, index, 'dose', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.infusionRate} onChange={(e) => handleInputChange(e, index, 'infusionRate', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.drSign} onChange={(e) => handleInputChange(e, index, 'drSign', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.start} onChange={(e) => handleInputChange(e, index, 'start', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.end} onChange={(e) => handleInputChange(e, index, 'end', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.given} onChange={(e) => handleInputChange(e, index, 'given', tableType)} className="p-1 border-r border-gray-400 focus:outline-none" />
-            <input type="text" value={row.checked} onChange={(e) => handleInputChange(e, index, 'checked', tableType)} className="p-1 focus:outline-none" />
+          <div key={index} className={`grid ${gridColumnsClass} text-xs text-center border-t border-gray-400 min-h-[30px]`}>
+            <div className="p-1 border-r border-gray-400 bg-gray-50 flex items-center justify-center">{row.srNo}</div>
+            <input type="text" value={row.time} onChange={(e) => handleInputChange(e, index, 'time', tableType)} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+            <input type="text" value={row.ivFluids} onChange={(e) => handleInputChange(e, index, 'ivFluids', tableType)} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+            <input type="text" value={row.volume} onChange={(e) => handleInputChange(e, index, 'volume', tableType)} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+            <input type="text" value={row.drugsAdded} onChange={(e) => handleInputChange(e, index, 'drugsAdded', tableType)} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+            <input type="text" value={row.dose} onChange={(e) => handleInputChange(e, index, 'dose', tableType)} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+            <input type="text" value={row.infusionRate} onChange={(e) => handleInputChange(e, index, 'infusionRate', tableType)} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+            <div className="border-r border-gray-400">{renderSignatureCell(row, index, 'drSign', tableType)}</div>
+            <input type="text" value={row.start} onChange={(e) => handleInputChange(e, index, 'start', tableType)} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+            <input type="text" value={row.end} onChange={(e) => handleInputChange(e, index, 'end', tableType)} className="p-1 border-r border-gray-400 focus:outline-none w-full" />
+            <div className="border-r border-gray-400">{renderSignatureCell(row, index, 'given', tableType)}</div>
+            <div>{renderSignatureCell(row, index, 'checked', tableType)}</div>
           </div>
         ))}
       </div>
@@ -234,10 +307,7 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
         </div>
       </div>
 
-      <div className="flex justify-between items-center mt-6">
-        <div className="flex gap-2">
-          {/* Add/Remove buttons for each table are inside the renderTable function */}
-        </div>
+      <div className="flex justify-end items-center mt-6">
         <button
           onClick={handleSave}
           disabled={isSaving}

@@ -1,4 +1,3 @@
-// Filename: nurses-notes.tsx
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -11,11 +10,11 @@ interface NursesNoteRow {
   date: string;
   medicationTreatment: string;
   nursesObservation: string;
-  signature: string;
+  signature: string; // This will hold either the PIN or the signature image URL
 }
 
 // --- Helper Function to Create Initial State ---
-const createInitialRows = (count: number = 15): NursesNoteRow[] => {
+const createInitialRows = (count: number = 3): NursesNoteRow[] => { // UPDATED: Default row count is now 3
   return Array.from({ length: count }, () => ({
     date: '',
     medicationTreatment: '',
@@ -29,6 +28,7 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
   const [rows, setRows] = useState<NursesNoteRow[]>(createInitialRows());
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [verifyingSignature, setVerifyingSignature] = useState<number | null>(null);
 
   // --- Data Fetching Function ---
   const fetchNursesNotes = useCallback(async () => {
@@ -71,11 +71,18 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
         setIsSaving(false);
         return;
       }
+      
+      const rowsToSave = rows.map(row => {
+        if (row.signature.length === 10 && !row.signature.startsWith('http')) {
+            return { ...row, signature: '' }; 
+        }
+        return row;
+      });
 
       const { error } = await supabase.from('ipd_record').upsert({
           ipd_id: ipdId,
           user_id: session.user.id,
-          nurses_notes: rows,
+          nurses_notes: rowsToSave,
         }, { onConflict: 'ipd_id,user_id' });
 
       if (error) throw error;
@@ -88,11 +95,56 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
     }
   };
 
+  // --- Signature Verification Function ---
+  const checkAndSetSignature = useCallback(async (password: string, index: number) => {
+    if (password.length !== 10) return;
+    setVerifyingSignature(index);
+    try {
+      const { data, error } = await supabase
+        .from('signature')
+        .select('signature_url')
+        .eq('password', password)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') throw error;
+
+      if (data?.signature_url) {
+        setRows(prevRows => prevRows.map((row, i) =>
+          i === index ? { ...row, signature: data.signature_url } : row
+        ));
+        toast.success(`Signature verified for row ${index + 1}.`);
+      } else {
+        toast.error(`Invalid signature PIN for row ${index + 1}.`);
+      }
+    } catch (error) {
+      console.error("Error verifying signature:", error);
+      toast.error("Could not verify signature.");
+    } finally {
+        setVerifyingSignature(null);
+    }
+  }, []);
+
   // --- Input Change Handler ---
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, index: number, field: keyof NursesNoteRow) => {
     const { value } = e.target;
-    setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: value } : row));
+    const newRows = rows.map((row, i) => i === index ? { ...row, [field]: value } : row);
+    setRows(newRows);
+    
+    if (field === 'signature' && value.length === 10) {
+      checkAndSetSignature(value, index);
+    }
   };
+  
+  // --- Reset Signature with Confirmation ---
+  const handleSignatureReset = (index: number) => {
+    if (window.confirm("Are you sure you want to remove this signature?")) {
+      setRows(prevRows => prevRows.map((row, i) =>
+        i === index ? { ...row, signature: '' } : row
+      ));
+      toast.info(`Signature for row ${index + 1} has been cleared.`);
+    }
+  };
+
 
   // --- Row Management Functions ---
   const addRow = () => {
@@ -135,7 +187,7 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
         {/* Table Body */}
         <div>
           {rows.map((row, index) => (
-            <div key={index} className="grid grid-cols-[150px_2fr_3fr_1fr] text-xs border-t border-gray-400">
+            <div key={index} className="grid grid-cols-[150px_2fr_3fr_1fr] text-xs border-t border-gray-400 min-h-[52px]">
               <input
                 type="text"
                 value={row.date}
@@ -155,12 +207,29 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
                 className="p-2 border-r border-gray-400 focus:outline-none w-full resize-none"
                 rows={2}
               />
-              <input
-                type="text"
-                value={row.signature}
-                onChange={(e) => handleInputChange(e, index, 'signature')}
-                className="p-2 focus:outline-none w-full"
-              />
+              <div className="flex items-center justify-center">
+                 {verifyingSignature === index ? (
+                    <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
+                 ) : row.signature.startsWith('http') ? (
+                    <img 
+                        src={row.signature} 
+                        alt="Signature"
+                        title="Click to remove signature"
+                        className="h-10 object-contain cursor-pointer p-1 hover:opacity-75 transition-opacity"
+                        onClick={() => handleSignatureReset(index)}
+                    />
+                 ) : (
+                    <input
+                        type="password"
+                        value={row.signature}
+                        onChange={(e) => handleInputChange(e, index, 'signature')}
+                        className="p-2 focus:outline-none w-full text-center"
+                        maxLength={10}
+                        placeholder="Enter 10-digit PIN"
+                        autoComplete="new-password"
+                    />
+                 )}
+              </div>
             </div>
           ))}
         </div>
