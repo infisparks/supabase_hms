@@ -24,7 +24,7 @@ import DrugChartSheet from "./drug-chart";
 import IVInfusionSheet from "./iv-infusion-sheet";
 import ClinicalNotesSheet from "./clinical-notes-sheet";
 import EmergencyCareRecordSheet from "./emergency-care-record-sheet"; // <-- ADDED THE NEW COMPONENT
-
+import discharge from "./discharge"
 // --- Type Definitions ---
 interface PatientDetails {
   uhid: string;
@@ -67,6 +67,7 @@ const IPDRecordPage = () => {
     { value: "drug-chart", label: "Drug Chart" },
     { value: "iv-infusion", label: "IV Infusion" },
     { value: "clinical-notes", label: "Clinical Notes" },
+    { value: "discharge", label: "Discharge" },
     { value: "emergency-care", label: "Emergency Care" }, // <-- ADDED NEW TAB
   ];
 
