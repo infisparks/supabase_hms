@@ -1,4 +1,3 @@
-// Filename: page.tsx
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -23,7 +22,12 @@ import AdmissionAssessmentForm from "./admission-assessment-form";
 import DrugChartSheet from "./drug-chart";
 import IVInfusionSheet from "./iv-infusion-sheet";
 import ClinicalNotesSheet from "./clinical-notes-sheet";
-import EmergencyCareRecordSheet from "./emergency-care-record-sheet"; // <-- ADDED THE NEW COMPONENT
+import EmergencyCareRecordSheet from "./emergency-care-record-sheet"; 
+import PatientFileForm from "./patient-file"; 
+import BloodTransfusionConsentForm from "./blood-transfusion-consent-form"; 
+import BloodTransfusionRecord from "./blood-transfusion-record"; 
+import SurgicalConsentForm from "./surgical-consent-form"; 
+import DischargeAgainstMedicalAdvice from "./discharge-against-medical-advice"; // <-- ADDED THE NEW COMPONENT
 import discharge from "./discharge"
 // --- Type Definitions ---
 interface PatientDetails {
@@ -52,9 +56,14 @@ const IPDRecordPage = () => {
   const { ipdId } = useParams();
   const [patientDetails, setPatientDetails] = useState<PatientDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("investigation");
+  const [activeTab, setActiveTab] = useState("discharge-against-medical-advice"); // <-- SET THE NEW TAB AS DEFAULT
 
   const tabs = [
+    { value: "discharge-against-medical-advice", label: "Discharge AMA" }, // <-- ADDED THE NEW TAB
+    { value: "surgical-consent", label: "Surgical Consent" },
+    { value: "blood-transfusion-record", label: "Transfusion Record" },
+    { value: "blood-transfusion-consent", label: "Blood Consent" },
+    { value: "patient-file", label: "Patient File" },
     { value: "charge", label: "Charges" },
     { value: "glucose", label: "Glucose" },
     { value: "admission", label: "Admission" },
@@ -68,7 +77,7 @@ const IPDRecordPage = () => {
     { value: "iv-infusion", label: "IV Infusion" },
     { value: "clinical-notes", label: "Clinical Notes" },
     { value: "discharge", label: "Discharge" },
-    { value: "emergency-care", label: "Emergency Care" }, // <-- ADDED NEW TAB
+    { value: "emergency-care", label: "Emergency Care" },
   ];
 
   // Function to fetch the IPD record and patient details
@@ -161,6 +170,26 @@ const IPDRecordPage = () => {
           ))}
         </TabsList>
 
+        <TabsContent value="discharge-against-medical-advice" className="mt-6">
+          <DischargeAgainstMedicalAdvice ipdId={ipdId as string} />
+        </TabsContent>
+
+        <TabsContent value="surgical-consent" className="mt-6">
+          <SurgicalConsentForm ipdId={ipdId as string} />
+        </TabsContent>
+
+        <TabsContent value="blood-transfusion-record" className="mt-6">
+          <BloodTransfusionRecord ipdId={ipdId as string} />
+        </TabsContent>
+
+        <TabsContent value="blood-transfusion-consent" className="mt-6">
+          <BloodTransfusionConsentForm ipdId={ipdId as string} />
+        </TabsContent>
+
+        <TabsContent value="patient-file" className="mt-6">
+          <PatientFileForm ipdId={ipdId as string} />
+        </TabsContent>
+        
         <TabsContent value="admission" className="mt-6">
           <AdmissionAssessmentForm ipdId={ipdId as string} />
         </TabsContent>
@@ -210,7 +239,7 @@ const IPDRecordPage = () => {
         </TabsContent>
 
         {/* Placeholder Tabs for other content */}
-        {tabs.filter(t => !["admission", "charge", "glucose", "investigation", "progress", "nurse", "vital", "doctor", "drug-chart", "iv-infusion", "clinical-notes", "emergency-care"].includes(t.value)).map(tab => (
+        {tabs.filter(t => !["admission", "charge", "glucose", "investigation", "progress", "nurse", "vital", "doctor", "drug-chart", "iv-infusion", "clinical-notes", "emergency-care", "patient-file", "blood-transfusion-consent", "blood-transfusion-record", "surgical-consent", "discharge-against-medical-advice"].includes(t.value)).map(tab => (
           <TabsContent key={tab.value} value={tab.value} className="mt-6">
             <Card className="bg-white shadow-md p-6">
               <CardTitle className="text-lg font-semibold text-gray-800">
