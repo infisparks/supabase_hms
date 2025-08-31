@@ -1,20 +1,14 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
+// import PatientDetailsHeader from "./PatientDetailsHeader";
+import PdfGenerator from "./PdfGenerator";
 
 // --- Type Definitions ---
 interface DischargeFormData {
-  patientNameHeader: string;
-  ageSex: string;
-  roomWardNo: string;
-  uhidNo: string;
-  ipdNo: string;
-  contactNo: string;
-  underCareOfDoctor: string;
-  admissionDate: string;
   patientName: string;
   specificRisks: string;
   specificRisks2: string;
@@ -39,14 +33,6 @@ interface DischargeFormData {
 
 // --- Initial State for the Form ---
 const initialDischargeData: DischargeFormData = {
-  patientNameHeader: "",
-  ageSex: "",
-  roomWardNo: "",
-  uhidNo: "",
-  ipdNo: "",
-  contactNo: "",
-  underCareOfDoctor: "",
-  admissionDate: "",
   patientName: "",
   specificRisks: "",
   specificRisks2: "",
@@ -78,29 +64,28 @@ const DischargeAgainstMedicalAdvice = ({ ipdId }: { ipdId: string }) => {
     signatureOfPatient: false,
     signatureOfWitness: false,
   });
+  const formRef = useRef<HTMLDivElement>(null);
 
   const fetchDischargeData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         toast.error("User not authenticated. Cannot save data.");
         setIsLoading(false);
         return;
       }
 
-      const { data, error } = await supabase
+      const { data: dischargeData, error: dischargeError } = await supabase
         .from("ipd_record")
         .select("discharge_data")
         .eq("ipd_id", ipdId)
         .single();
 
-      if (error && error.code !== "PGRST116") throw error;
+      if (dischargeError && dischargeError.code !== "PGRST116") throw dischargeError;
 
-      if (data?.discharge_data) {
-        setFormData(data.discharge_data as DischargeFormData);
+      if (dischargeData?.discharge_data) {
+        setFormData(dischargeData.discharge_data as DischargeFormData);
         toast.success("Discharge data loaded.");
       }
     } catch (error) {
@@ -118,9 +103,7 @@ const DischargeAgainstMedicalAdvice = ({ ipdId }: { ipdId: string }) => {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         toast.error("User not authenticated. Cannot save data.");
         setIsSaving(false);
@@ -242,45 +225,9 @@ const DischargeAgainstMedicalAdvice = ({ ipdId }: { ipdId: string }) => {
   }
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-xl max-w-4xl mx-auto font-sans text-xs">
+    <div ref={formRef} className="bg-white p-6 rounded-lg shadow-xl max-w-4xl mx-auto font-sans text-xs">
       <div className="text-center mb-6">
         <h2 className="font-bold text-lg">DISCHARGE AGAINST MEDICAL ADVICE</h2>
-      </div>
-
-      {/* Patient Details Header Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2 mb-6">
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Name of Patient:</label>
-          <input type="text" value={formData.patientNameHeader} onChange={(e) => handleInputChange(e, "patientNameHeader")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Age/Sex:</label>
-          <input type="text" value={formData.ageSex} onChange={(e) => handleInputChange(e, "ageSex")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Room/Ward No:</label>
-          <input type="text" value={formData.roomWardNo} onChange={(e) => handleInputChange(e, "roomWardNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>UHID No:</label>
-          <input type="text" value={formData.uhidNo} onChange={(e) => handleInputChange(e, "uhidNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>IPD No:</label>
-          <input type="text" value={formData.ipdNo} onChange={(e) => handleInputChange(e, "ipdNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Contact No.:</label>
-          <input type="text" value={formData.contactNo} onChange={(e) => handleInputChange(e, "contactNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Under Care of Doctor:</label>
-          <input type="text" value={formData.underCareOfDoctor} onChange={(e) => handleInputChange(e, "underCareOfDoctor")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Admission Date:</label>
-          <input type="text" value={formData.admissionDate} onChange={(e) => handleInputChange(e, "admissionDate")} className={inputClass} />
-        </div>
       </div>
 
       <div className="space-y-4">
@@ -374,7 +321,8 @@ const DischargeAgainstMedicalAdvice = ({ ipdId }: { ipdId: string }) => {
         </div>
       </div>
 
-      <div className="flex justify-end mt-6">
+      <div className="flex justify-end mt-6 space-x-4 no-pdf">
+        <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="DischargeAgainstMedicalAdvice" />
         <button
           onClick={handleSave}
           disabled={isSaving}

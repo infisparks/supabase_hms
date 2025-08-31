@@ -1,10 +1,11 @@
-// Filename: clinical-notes-sheet.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
-import { toast } from 'sonner';
-import { RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
+import { RefreshCw } from "lucide-react";
+import PatientDetailsHeader from "./PatientDetailsHeader"; // Import the new component
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 // --- Type Definitions ---
 interface ClinicalNotesData {
@@ -49,6 +50,7 @@ const ClinicalNotesSheet = ({ ipdId }: { ipdId: string }) => {
   const [clinicalNotes, setClinicalNotes] = useState<ClinicalNotesData>(initialClinicalNotes);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null); // Create the ref
 
   // --- Data Fetching Function ---
   const fetchClinicalNotes = useCallback(async () => {
@@ -134,7 +136,7 @@ const ClinicalNotesSheet = ({ ipdId }: { ipdId: string }) => {
   }
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-xl max-w-full mx-auto font-sans text-sm">
+    <div ref={formRef} className="bg-white p-6 rounded-lg shadow-xl max-w-full mx-auto font-sans text-sm">
       <div className="text-center mb-6">
         <h1 className="font-bold text-2xl uppercase">Clinical Notes</h1>
         <p className="text-sm text-gray-500">
@@ -142,7 +144,7 @@ const ClinicalNotesSheet = ({ ipdId }: { ipdId: string }) => {
         </p>
       </div>
 
-      {/* The patient header block has been removed from here */}
+      <PatientDetailsHeader ipdId={ipdId} />
 
       {/* Clinical Notes Sections */}
       <div className="space-y-4">
@@ -205,7 +207,7 @@ const ClinicalNotesSheet = ({ ipdId }: { ipdId: string }) => {
             className="w-full h-24 p-2 border-none focus:outline-none resize-none"
           ></textarea>
         </div>
-        
+
         <div className="border border-gray-300 rounded-md p-3">
           <label htmlFor="perAbdomen" className="font-semibold block mb-1">Per Abdomen:</label>
           <textarea
@@ -298,13 +300,14 @@ const ClinicalNotesSheet = ({ ipdId }: { ipdId: string }) => {
         </div>
       </div>
 
-      <div className="flex justify-end mt-6">
+      <div className="flex justify-end mt-6 no-pdf">
+        <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="ClinicalNotesSheet" />
         <button
           onClick={handleSave}
           disabled={isSaving}
           className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
         >
-          {isSaving ? ( <> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </> ) : ( "Save Clinical Notes" )}
+          {isSaving ? (<> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </>) : ("Save Clinical Notes")}
         </button>
       </div>
     </div>

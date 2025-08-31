@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { RefreshCw, PlusCircle, MinusCircle } from 'lucide-react';
+import PatientDetailsHeader from "./PatientDetailsHeader";
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 // --- Type Definitions ---
 interface NursesNoteRow {
@@ -29,6 +31,7 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [verifyingSignature, setVerifyingSignature] = useState<number | null>(null);
+  const formRef = useRef<HTMLDivElement>(null); // Create the ref
 
   // --- Data Fetching Function ---
   const fetchNursesNotes = useCallback(async () => {
@@ -71,19 +74,19 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
         setIsSaving(false);
         return;
       }
-      
+
       const rowsToSave = rows.map(row => {
         if (row.signature.length === 10 && !row.signature.startsWith('http')) {
-            return { ...row, signature: '' }; 
+          return { ...row, signature: '' };
         }
         return row;
       });
 
       const { error } = await supabase.from('ipd_record').upsert({
-          ipd_id: ipdId,
-          user_id: session.user.id,
-          nurses_notes: rowsToSave,
-        }, { onConflict: 'ipd_id,user_id' });
+        ipd_id: ipdId,
+        user_id: session.user.id,
+        nurses_notes: rowsToSave,
+      }, { onConflict: 'ipd_id,user_id' });
 
       if (error) throw error;
       toast.success("Nurses' notes saved successfully!");
@@ -105,7 +108,7 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
         .select('signature_url')
         .eq('password', password)
         .single();
-      
+
       if (error && error.code !== 'PGRST116') throw error;
 
       if (data?.signature_url) {
@@ -120,7 +123,7 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
       console.error("Error verifying signature:", error);
       toast.error("Could not verify signature.");
     } finally {
-        setVerifyingSignature(null);
+      setVerifyingSignature(null);
     }
   }, []);
 
@@ -129,12 +132,12 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
     const { value } = e.target;
     const newRows = rows.map((row, i) => i === index ? { ...row, [field]: value } : row);
     setRows(newRows);
-    
+
     if (field === 'signature' && value.length === 10) {
       checkAndSetSignature(value, index);
     }
   };
-  
+
   // --- Reset Signature with Confirmation ---
   const handleSignatureReset = (index: number) => {
     if (window.confirm("Are you sure you want to remove this signature?")) {
@@ -170,10 +173,12 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
   }
 
   return (
-    <div className="bg-white p-8 rounded-lg shadow-xl max-w-7xl mx-auto font-sans">
+    <div ref={formRef} className="bg-white p-8 rounded-lg shadow-xl max-w-7xl mx-auto font-sans">
       <div className="text-center mb-6">
         <h1 className="font-bold text-2xl uppercase">Nurses Notes</h1>
       </div>
+
+      <PatientDetailsHeader ipdId={ipdId} />
 
       <div className="border border-gray-400 rounded-md overflow-hidden">
         {/* Table Header */}
@@ -208,49 +213,52 @@ const NursesNotesSheet = ({ ipdId }: { ipdId: string }) => {
                 rows={2}
               />
               <div className="flex items-center justify-center">
-                 {verifyingSignature === index ? (
-                    <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
-                 ) : row.signature.startsWith('http') ? (
-                    <img 
-                        src={row.signature} 
-                        alt="Signature"
-                        title="Click to remove signature"
-                        className="h-10 object-contain cursor-pointer p-1 hover:opacity-75 transition-opacity"
-                        onClick={() => handleSignatureReset(index)}
-                    />
-                 ) : (
-                    <input
-                        type="password"
-                        value={row.signature}
-                        onChange={(e) => handleInputChange(e, index, 'signature')}
-                        className="p-2 focus:outline-none w-full text-center"
-                        maxLength={10}
-                        placeholder="Enter 10-digit PIN"
-                        autoComplete="new-password"
-                    />
-                 )}
+                {verifyingSignature === index ? (
+                  <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
+                ) : row.signature.startsWith('http') ? (
+                  <img
+                    src={row.signature}
+                    alt="Signature"
+                    title="Click to remove signature"
+                    className="h-10 object-contain cursor-pointer p-1 hover:opacity-75 transition-opacity"
+                    onClick={() => handleSignatureReset(index)}
+                  />
+                ) : (
+                  <input
+                    type="password"
+                    value={row.signature}
+                    onChange={(e) => handleInputChange(e, index, 'signature')}
+                    className="p-2 focus:outline-none w-full text-center"
+                    maxLength={10}
+                    placeholder="Enter 10-digit PIN"
+                    autoComplete="new-password"
+                  />
+                )}
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="flex justify-between items-center mt-6">
+      <div className="flex justify-between items-center mt-6 no-pdf">
         <div className="flex gap-2">
-            <button onClick={addRow} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-blue-500 hover:bg-blue-600">
-                <PlusCircle className="h-4 w-4" /> Add Row
-            </button>
-            <button onClick={removeRow} disabled={rows.length <= 1} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-red-500 hover:bg-red-600 disabled:bg-gray-400">
-                <MinusCircle className="h-4 w-4" /> Remove Row
-            </button>
+          <button onClick={addRow} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-blue-500 hover:bg-blue-600">
+            <PlusCircle className="h-4 w-4" /> Add Row
+          </button>
+          <button onClick={removeRow} disabled={rows.length <= 1} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-red-500 hover:bg-red-600 disabled:bg-gray-400">
+            <MinusCircle className="h-4 w-4" /> Remove Row
+          </button>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
-        >
-          {isSaving ? ( <> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </> ) : ( "Save Nurses' Notes" )}
-        </button>
+        <div className="flex space-x-4">
+          <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="NursesNotesSheet" />
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
+          >
+            {isSaving ? (<> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </>) : ("Save Nurses' Notes")}
+          </button>
+        </div>
       </div>
     </div>
   );

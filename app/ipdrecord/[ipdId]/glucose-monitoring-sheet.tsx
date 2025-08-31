@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { RefreshCw, PlusCircle, MinusCircle } from 'lucide-react';
+import PatientDetailsHeader from "./PatientDetailsHeader";
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 // --- Type Definitions ---
 interface GlucoseRow {
@@ -32,6 +34,7 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [verifyingSignature, setVerifyingSignature] = useState<number | null>(null);
+  const formRef = useRef<HTMLDivElement>(null); // Create the ref
 
   // --- Data Fetching Function ---
   const fetchGlucoseData = useCallback(async () => {
@@ -77,17 +80,17 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
 
       // Clear any unsaved PINs before saving
       const rowsToSave = rows.map(row => {
-          if(row.signId.length === 10 && !row.signId.startsWith('http')) {
-              return { ...row, signId: '' };
-          }
-          return row;
+        if (row.signId.length === 10 && !row.signId.startsWith('http')) {
+          return { ...row, signId: '' };
+        }
+        return row;
       });
 
       const { error } = await supabase.from('ipd_record').upsert({
-          ipd_id: ipdId,
-          user_id: session.user.id,
-          glucose_data: rowsToSave,
-        }, { onConflict: 'ipd_id,user_id' });
+        ipd_id: ipdId,
+        user_id: session.user.id,
+        glucose_data: rowsToSave,
+      }, { onConflict: 'ipd_id,user_id' });
 
       if (error) throw error;
       toast.success("Glucose monitoring sheet saved successfully!");
@@ -109,7 +112,7 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
         .select('signature_url')
         .eq('password', password)
         .single();
-      
+
       if (error && error.code !== 'PGRST116') throw error;
 
       if (data?.signature_url) {
@@ -124,7 +127,7 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
       console.error("Error verifying signature:", error);
       toast.error("Could not verify signature.");
     } finally {
-        setVerifyingSignature(null);
+      setVerifyingSignature(null);
     }
   }, []);
 
@@ -133,7 +136,7 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
     const { value } = e.target;
     const newRows = rows.map((row, i) => i === index ? { ...row, [field]: value } : row);
     setRows(newRows);
-    
+
     if (field === 'signId' && value.length === 10) {
       checkAndSetSignature(value, index);
     }
@@ -175,10 +178,12 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
   const gridColumnsClass = "grid-cols-[1fr_1fr_1fr_1fr_2fr_1fr_1.5fr_1fr_1.5fr]";
 
   return (
-    <div className="bg-white p-8 rounded-lg shadow-xl max-w-7xl mx-auto font-sans">
+    <div ref={formRef} className="bg-white p-8 rounded-lg shadow-xl max-w-7xl mx-auto font-sans">
       <div className="text-center mb-6">
         <h1 className="font-bold text-2xl uppercase">Glucose Monitoring Sheet</h1>
       </div>
+
+      <PatientDetailsHeader ipdId={ipdId} />
 
       <div className="border border-gray-400 rounded-md overflow-hidden">
         {/* Table Header */}
@@ -205,51 +210,54 @@ const GlucoseMonitoringSheet = ({ ipdId }: { ipdId: string }) => {
               <input type="text" value={row.medication} onChange={(e) => handleInputChange(e, index, 'medication')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
               <input type="text" value={row.dose} onChange={(e) => handleInputChange(e, index, 'dose')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
               <input type="text" value={row.orderedBy} onChange={(e) => handleInputChange(e, index, 'orderedBy')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
-              <input type="text" value={row.timeGiven} onChange={(e) => handleInputChange(e, index, 'timeGiven')} className="p-2 border-r border-gray-400 focus:outline-none w-full" />
+              <input type="text" value={row.timeGiven} onChange={(e) => handleInputChange(e, index, 'timeGiven')} className="p-2 border-r border-b border-gray-400 focus:outline-none w-full" />
               <div className="flex items-center justify-center">
-                 {verifyingSignature === index ? (
-                    <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
-                 ) : row.signId.startsWith('http') ? (
-                    <img 
-                        src={row.signId} 
-                        alt="Signature"
-                        title="Click to clear signature"
-                        className="h-8 object-contain cursor-pointer p-1 hover:opacity-75"
-                        onClick={() => handleSignatureReset(index)}
-                    />
-                 ) : (
-                    <input
-                        type="password"
-                        value={row.signId}
-                        onChange={(e) => handleInputChange(e, index, 'signId')}
-                        className="p-2 focus:outline-none w-full text-center"
-                        maxLength={10}
-                        placeholder="PIN"
-                        autoComplete="new-password"
-                    />
-                 )}
+                {verifyingSignature === index ? (
+                  <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
+                ) : row.signId.startsWith('http') ? (
+                  <img
+                    src={row.signId}
+                    alt="Signature"
+                    title="Click to clear signature"
+                    className="h-8 object-contain cursor-pointer p-1 hover:opacity-75"
+                    onClick={() => handleSignatureReset(index)}
+                  />
+                ) : (
+                  <input
+                    type="password"
+                    value={row.signId}
+                    onChange={(e) => handleInputChange(e, index, 'signId')}
+                    className="p-2 focus:outline-none w-full text-center"
+                    maxLength={10}
+                    placeholder="PIN"
+                    autoComplete="new-password"
+                  />
+                )}
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="flex justify-between items-center mt-6">
+      <div className="flex justify-between items-center mt-6 no-pdf">
         <div className="flex gap-2">
-            <button onClick={addRow} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-blue-500 hover:bg-blue-600">
-                <PlusCircle className="h-4 w-4" /> Add Row
-            </button>
-            <button onClick={removeRow} disabled={rows.length <= 1} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-red-500 hover:bg-red-600 disabled:bg-gray-400">
-                <MinusCircle className="h-4 w-4" /> Remove Row
-            </button>
+          <button onClick={addRow} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-blue-500 hover:bg-blue-600">
+            <PlusCircle className="h-4 w-4" /> Add Row
+          </button>
+          <button onClick={removeRow} disabled={rows.length <= 1} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-red-500 hover:bg-red-600 disabled:bg-gray-400">
+            <MinusCircle className="h-4 w-4" /> Remove Row
+          </button>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
-        >
-          {isSaving ? ( <> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </> ) : ( "Save Glucose Sheet" )}
-        </button>
+        <div className="flex space-x-4">
+          <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="GlucoseMonitoringSheet" />
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
+          >
+            {isSaving ? (<> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </>) : ("Save Glucose Sheet")}
+          </button>
+        </div>
       </div>
     </div>
   );

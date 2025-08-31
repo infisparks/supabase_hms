@@ -27,8 +27,9 @@ import PatientFileForm from "./patient-file";
 import BloodTransfusionConsentForm from "./blood-transfusion-consent-form"; 
 import BloodTransfusionRecord from "./blood-transfusion-record"; 
 import SurgicalConsentForm from "./surgical-consent-form"; 
-import DischargeAgainstMedicalAdvice from "./discharge-against-medical-advice"; // <-- ADDED THE NEW COMPONENT
-import discharge from "./discharge"
+import DischargeAgainstMedicalAdvice from "./discharge-against-medical-advice"; 
+import DischargeSummary from "./discharge-summary"; 
+
 // --- Type Definitions ---
 interface PatientDetails {
   uhid: string;
@@ -56,10 +57,9 @@ const IPDRecordPage = () => {
   const { ipdId } = useParams();
   const [patientDetails, setPatientDetails] = useState<PatientDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("discharge-against-medical-advice"); // <-- SET THE NEW TAB AS DEFAULT
+  const [activeTab, setActiveTab] = useState("patient-file"); // <-- SET THE NEW DEFAULT TAB
 
   const tabs = [
-    { value: "discharge-against-medical-advice", label: "Discharge AMA" }, // <-- ADDED THE NEW TAB
     { value: "surgical-consent", label: "Surgical Consent" },
     { value: "blood-transfusion-record", label: "Transfusion Record" },
     { value: "blood-transfusion-consent", label: "Blood Consent" },
@@ -68,7 +68,7 @@ const IPDRecordPage = () => {
     { value: "glucose", label: "Glucose" },
     { value: "admission", label: "Admission" },
     { value: "investigation", label: "Investigation" },
-    { value: "clinic", label: "Clinic" },
+    // { value: "clinic", label: "Clinic" },
     { value: "progress", label: "Progress" },
     { value: "nurse", label: "Nurse" },
     { value: "vital", label: "Vitals" },
@@ -76,7 +76,8 @@ const IPDRecordPage = () => {
     { value: "drug-chart", label: "Drug Chart" },
     { value: "iv-infusion", label: "IV Infusion" },
     { value: "clinical-notes", label: "Clinical Notes" },
-    { value: "discharge", label: "Discharge" },
+    { value: "discharge", label: "Discharge" }, 
+    { value: "discharge-against-medical-advice", label: "Discharge AMA" }, 
     { value: "emergency-care", label: "Emergency Care" },
   ];
 
@@ -169,9 +170,13 @@ const IPDRecordPage = () => {
             </TabsTrigger>
           ))}
         </TabsList>
+        
+        <TabsContent value="patient-file" className="mt-6">
+          <PatientFileForm ipdId={ipdId as string} />
+        </TabsContent>
 
-        <TabsContent value="discharge-against-medical-advice" className="mt-6">
-          <DischargeAgainstMedicalAdvice ipdId={ipdId as string} />
+        <TabsContent value="discharge" className="mt-6">
+          <DischargeSummary ipdId={ipdId as string} />
         </TabsContent>
 
         <TabsContent value="surgical-consent" className="mt-6">
@@ -184,10 +189,6 @@ const IPDRecordPage = () => {
 
         <TabsContent value="blood-transfusion-consent" className="mt-6">
           <BloodTransfusionConsentForm ipdId={ipdId as string} />
-        </TabsContent>
-
-        <TabsContent value="patient-file" className="mt-6">
-          <PatientFileForm ipdId={ipdId as string} />
         </TabsContent>
         
         <TabsContent value="admission" className="mt-6">
@@ -207,7 +208,7 @@ const IPDRecordPage = () => {
         </TabsContent>
 
         <TabsContent value="progress" className="mt-6">
-          <IndoorPatientProgressNotes ipdId={ipdId as string} />
+          <IndoorPatientProgressNotes ipdId={ipdId as string}  />
         </TabsContent>
         
         <TabsContent value="nurse" className="mt-6">
@@ -234,12 +235,16 @@ const IPDRecordPage = () => {
           <ClinicalNotesSheet ipdId={ipdId as string} />
         </TabsContent>
 
+        <TabsContent value="discharge-against-medical-advice" className="mt-6">
+          <DischargeAgainstMedicalAdvice ipdId={ipdId as string} />
+        </TabsContent>
+        
         <TabsContent value="emergency-care" className="mt-6">
           <EmergencyCareRecordSheet ipdId={ipdId as string} />
         </TabsContent>
 
         {/* Placeholder Tabs for other content */}
-        {tabs.filter(t => !["admission", "charge", "glucose", "investigation", "progress", "nurse", "vital", "doctor", "drug-chart", "iv-infusion", "clinical-notes", "emergency-care", "patient-file", "blood-transfusion-consent", "blood-transfusion-record", "surgical-consent", "discharge-against-medical-advice"].includes(t.value)).map(tab => (
+        {tabs.filter(t => !["admission", "charge", "glucose", "investigation", "progress", "nurse", "vital", "doctor", "drug-chart", "iv-infusion", "clinical-notes", "emergency-care", "patient-file", "blood-transfusion-consent", "blood-transfusion-record", "surgical-consent", "discharge-against-medical-advice", "discharge"].includes(t.value)).map(tab => (
           <TabsContent key={tab.value} value={tab.value} className="mt-6">
             <Card className="bg-white shadow-md p-6">
               <CardTitle className="text-lg font-semibold text-gray-800">

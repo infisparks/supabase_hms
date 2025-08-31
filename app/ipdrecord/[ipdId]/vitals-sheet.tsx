@@ -1,10 +1,11 @@
-// Filename: vitals-sheet.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { RefreshCw } from 'lucide-react';
+import PatientDetailsHeader from "./PatientDetailsHeader";
+import PdfGenerator from "./PdfGenerator";
 
 // --- Type Definitions ---
 interface VitalsRow {
@@ -40,7 +41,7 @@ const createInitialData = (): VitalsRow[] => {
 };
 
 const initialTotals = {
-    oral: '', iv: '', urine: '', stool: '', aspiration: '', insulin: ''
+  oral: '', iv: '', urine: '', stool: '', aspiration: '', insulin: ''
 };
 
 // --- Main Vitals Sheet Component ---
@@ -49,11 +50,19 @@ const VitalsSheet = ({ ipdId }: { ipdId: string }) => {
   const [totals, setTotals] = useState(initialTotals);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
 
   // --- Data Fetching Function ---
   const fetchVitalsData = useCallback(async () => {
     setIsLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error("User not authenticated.");
+        setIsLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('ipd_record')
         .select('vitals_data')
@@ -92,14 +101,14 @@ const VitalsSheet = ({ ipdId }: { ipdId: string }) => {
         setIsSaving(false);
         return;
       }
-      
+
       const dataToSave: VitalsData = { rows, totals };
 
       const { error } = await supabase.from('ipd_record').upsert({
-          ipd_id: ipdId,
-          user_id: session.user.id,
-          vitals_data: dataToSave,
-        }, { onConflict: 'ipd_id,user_id' });
+        ipd_id: ipdId,
+        user_id: session.user.id,
+        vitals_data: dataToSave,
+      }, { onConflict: 'ipd_id,user_id' });
 
       if (error) throw error;
       toast.success("Vitals sheet saved successfully!");
@@ -118,8 +127,8 @@ const VitalsSheet = ({ ipdId }: { ipdId: string }) => {
   };
 
   const handleTotalInputChange = (e: React.ChangeEvent<HTMLInputElement>, field: keyof typeof totals) => {
-      const { value } = e.target;
-      setTotals(prev => ({...prev, [field]: value}));
+    const { value } = e.target;
+    setTotals(prev => ({ ...prev, [field]: value }));
   };
 
   if (isLoading) {
@@ -132,12 +141,17 @@ const VitalsSheet = ({ ipdId }: { ipdId: string }) => {
   }
 
   const gridColumnsClass = "grid-cols-[80px_repeat(4,60px)_repeat(2,1fr)_repeat(3,1fr)_1fr]";
+  const tableHeaderClass = "bg-gray-200 text-center font-bold text-xs p-2 border-r border-gray-300";
+  const tableCellClass = "p-2 border-r border-gray-300 focus:outline-none text-xs";
+  const tableCellLastClass = "p-2 focus:outline-none text-xs";
 
   return (
-    <div className="bg-white p-8 rounded-lg shadow-xl max-w-7xl mx-auto font-sans">
+    <div ref={formRef} className="bg-white p-8 rounded-lg shadow-xl max-w-7xl mx-auto font-sans">
       <div className="text-center mb-6">
         <h1 className="font-bold text-2xl uppercase">Vitals Sheet</h1>
       </div>
+
+      <PatientDetailsHeader ipdId={ipdId} />
 
       <div className="border border-gray-400 rounded-md overflow-hidden">
         {/* Table Header */}
@@ -174,26 +188,27 @@ const VitalsSheet = ({ ipdId }: { ipdId: string }) => {
               <input type="text" value={row.insulin} onChange={(e) => handleInputChange(e, index, 'insulin')} className="p-2 focus:outline-none w-full" />
             </div>
           ))}
-            {/* Totals Row */}
-            <div className={`grid ${gridColumnsClass} text-xs text-center border-t-2 border-gray-600 font-bold`}>
-              <div className="p-2 border-r border-gray-400 col-span-5 flex items-center justify-end pr-4">Total in 24 Hrs.</div>
-              <input type="text" value={totals.oral} onChange={(e) => handleTotalInputChange(e, 'oral')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
-              <input type="text" value={totals.iv} onChange={(e) => handleTotalInputChange(e, 'iv')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
-              <input type="text" value={totals.urine} onChange={(e) => handleTotalInputChange(e, 'urine')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
-              <input type="text" value={totals.stool} onChange={(e) => handleTotalInputChange(e, 'stool')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
-              <input type="text" value={totals.aspiration} onChange={(e) => handleTotalInputChange(e, 'aspiration')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
-              <input type="text" value={totals.insulin} onChange={(e) => handleTotalInputChange(e, 'insulin')} className="p-2 focus:outline-none w-full font-bold" />
-            </div>
+          {/* Totals Row */}
+          <div className={`grid ${gridColumnsClass} text-xs text-center border-t-2 border-gray-600 font-bold`}>
+            <div className="p-2 border-r border-gray-400 col-span-5 flex items-center justify-end pr-4">Total in 24 Hrs.</div>
+            <input type="text" value={totals.oral} onChange={(e) => handleTotalInputChange(e, 'oral')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
+            <input type="text" value={totals.iv} onChange={(e) => handleTotalInputChange(e, 'iv')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
+            <input type="text" value={totals.urine} onChange={(e) => handleTotalInputChange(e, 'urine')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
+            <input type="text" value={totals.stool} onChange={(e) => handleTotalInputChange(e, 'stool')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
+            <input type="text" value={totals.aspiration} onChange={(e) => handleTotalInputChange(e, 'aspiration')} className="p-2 border-r border-gray-400 focus:outline-none w-full font-bold" />
+            <input type="text" value={totals.insulin} onChange={(e) => handleTotalInputChange(e, 'insulin')} className="p-2 focus:outline-none w-full font-bold" />
+          </div>
         </div>
       </div>
 
-      <div className="flex justify-end mt-6">
+      <div className="flex justify-end mt-6 space-x-4 no-pdf">
+        <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="VitalSheet" />
         <button
           onClick={handleSave}
           disabled={isSaving}
           className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
         >
-          {isSaving ? ( <> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </> ) : ( "Save Vitals Sheet" )}
+          {isSaving ? (<> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </>) : ("Save Vitals Sheet")}
         </button>
       </div>
     </div>

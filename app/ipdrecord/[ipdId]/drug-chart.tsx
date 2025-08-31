@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { RefreshCw, PlusCircle, MinusCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import PatientDetailsHeader from "./PatientDetailsHeader";
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 // --- Type Definitions ---
 interface DrugChartRow {
@@ -21,13 +23,13 @@ interface DrugChartRow {
 }
 
 interface DrugChartHeader {
-    allergy: string;
-    diagnosis: string;
-    bloodProduct: string;
-    nutrition: string;
-    chartFilledBySign: string; // Will hold PIN or signature URL
-    chartAuditedBySign: string; // Will hold PIN or signature URL
-    consultantSign: string; // Will hold PIN or signature URL
+  allergy: string;
+  diagnosis: string;
+  bloodProduct: string;
+  nutrition: string;
+  chartFilledBySign: string; // Will hold PIN or signature URL
+  chartAuditedBySign: string; // Will hold PIN or signature URL
+  consultantSign: string; // Will hold PIN or signature URL
 }
 
 // --- Helper Function to Create Initial State ---
@@ -49,13 +51,13 @@ const createInitialData = (count: number = 2): DrugChartRow[] => {
 };
 
 const initialHeaderInfo: DrugChartHeader = {
-    allergy: '',
-    diagnosis: '',
-    bloodProduct: '',
-    nutrition: '',
-    chartFilledBySign: '',
-    chartAuditedBySign: '',
-    consultantSign: ''
+  allergy: '',
+  diagnosis: '',
+  bloodProduct: '',
+  nutrition: '',
+  chartFilledBySign: '',
+  chartAuditedBySign: '',
+  consultantSign: ''
 };
 
 // --- Main Drug Chart Component ---
@@ -65,6 +67,7 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [verifyingSignature, setVerifyingSignature] = useState<string | null>(null);
+  const formRef = useRef<HTMLDivElement>(null); // Create the ref
 
   // --- Data Fetching Function ---
   const fetchDrugChartData = useCallback(async () => {
@@ -94,7 +97,7 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
       setIsLoading(false);
     }
   }, [ipdId]);
-  
+
   useEffect(() => {
     if (ipdId) fetchDrugChartData();
   }, [ipdId, fetchDrugChartData]);
@@ -114,9 +117,9 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
       const headerToSave = { ...headerInfo };
       const signatureFields: (keyof DrugChartHeader)[] = ['chartFilledBySign', 'chartAuditedBySign', 'consultantSign'];
       signatureFields.forEach(field => {
-          if (headerToSave[field].length === 10 && !headerToSave[field].startsWith('http')) {
-              headerToSave[field] = '';
-          }
+        if (headerToSave[field].length === 10 && !headerToSave[field].startsWith('http')) {
+          headerToSave[field] = '';
+        }
       });
 
       const { error } = await supabase.from('ipd_record').upsert({
@@ -138,29 +141,29 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
 
   // --- Signature Verification ---
   const checkAndSetSignature = useCallback(async (password: string, field: keyof DrugChartHeader) => {
-      if (password.length !== 10) return;
-      setVerifyingSignature(field);
-      try {
-          const { data, error } = await supabase
-              .from('signature')
-              .select('signature_url')
-              .eq('password', password)
-              .single();
+    if (password.length !== 10) return;
+    setVerifyingSignature(field);
+    try {
+      const { data, error } = await supabase
+        .from('signature')
+        .select('signature_url')
+        .eq('password', password)
+        .single();
 
-          if (error && error.code !== 'PGRST116') throw error;
+      if (error && error.code !== 'PGRST116') throw error;
 
-          if (data?.signature_url) {
-              setHeaderInfo(prev => ({ ...prev, [field]: data.signature_url }));
-              toast.success(`Signature verified successfully.`);
-          } else {
-              toast.error(`Invalid signature PIN.`);
-          }
-      } catch (error) {
-          console.error("Error verifying signature:", error);
-          toast.error("Could not verify signature.");
-      } finally {
-          setVerifyingSignature(null);
+      if (data?.signature_url) {
+        setHeaderInfo(prev => ({ ...prev, [field]: data.signature_url }));
+        toast.success(`Signature verified successfully.`);
+      } else {
+        toast.error(`Invalid signature PIN.`);
       }
+    } catch (error) {
+      console.error("Error verifying signature:", error);
+      toast.error("Could not verify signature.");
+    } finally {
+      setVerifyingSignature(null);
+    }
   }, []);
 
 
@@ -179,16 +182,16 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
     setHeaderInfo(prev => ({ ...prev, [field]: value }));
 
     const signatureFields: (keyof DrugChartHeader)[] = ['chartFilledBySign', 'chartAuditedBySign', 'consultantSign'];
-    if(signatureFields.includes(field) && value.length === 10) {
-        checkAndSetSignature(value, field);
+    if (signatureFields.includes(field) && value.length === 10) {
+      checkAndSetSignature(value, field);
     }
   };
 
   const handleSignatureReset = (field: keyof DrugChartHeader) => {
-      if(window.confirm("Are you sure you want to remove this signature?")) {
-          setHeaderInfo(prev => ({ ...prev, [field]: '' }));
-          toast.info("Signature has been cleared.");
-      }
+    if (window.confirm("Are you sure you want to remove this signature?")) {
+      setHeaderInfo(prev => ({ ...prev, [field]: '' }));
+      toast.info("Signature has been cleared.");
+    }
   };
 
   const handleHourlyChange = (e: React.ChangeEvent<HTMLInputElement>, index: number, time: string) => {
@@ -229,32 +232,32 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
 
   // --- Signature Renderer ---
   const renderSignatureArea = (field: keyof DrugChartHeader, label: string) => (
-      <div className="text-center">
-          {label}:
-          <div className="border-t border-gray-400 pt-2 mt-2 h-16 flex items-center justify-center">
-              {verifyingSignature === field ? (
-                  <RefreshCw className="h-6 w-6 animate-spin text-blue-500" />
-              ) : headerInfo[field].startsWith('http') ? (
-                  <img
-                      src={headerInfo[field]}
-                      alt="Signature"
-                      title="Click to remove signature"
-                      className="h-12 object-contain cursor-pointer"
-                      onClick={() => handleSignatureReset(field)}
-                  />
-              ) : (
-                  <input
-                      type="password"
-                      value={headerInfo[field]}
-                      onChange={(e) => handleHeaderChange(e, field)}
-                      maxLength={10}
-                      placeholder="Enter PIN"
-                      className="text-center w-full focus:outline-none bg-transparent"
-                      autoComplete="new-password"
-                  />
-              )}
-          </div>
+    <div className="text-center">
+      {label}:
+      <div className="border-t border-gray-400 pt-2 mt-2 h-16 flex items-center justify-center">
+        {verifyingSignature === field ? (
+          <RefreshCw className="h-6 w-6 animate-spin text-blue-500" />
+        ) : headerInfo[field].startsWith('http') ? (
+          <img
+            src={headerInfo[field]}
+            alt="Signature"
+            title="Click to remove signature"
+            className="h-12 object-contain cursor-pointer"
+            onClick={() => handleSignatureReset(field)}
+          />
+        ) : (
+          <input
+            type="password"
+            value={headerInfo[field]}
+            onChange={(e) => handleHeaderChange(e, field)}
+            maxLength={10}
+            placeholder="Enter PIN"
+            className="text-center w-full focus:outline-none bg-transparent"
+            autoComplete="new-password"
+          />
+        )}
       </div>
+    </div>
   );
 
   if (isLoading) {
@@ -266,18 +269,20 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
     );
   }
 
-  const hourlyTimes = ['12 am', '2 am', '4 am', '6 am', '8 am', '10 am', '12 pm', '2 pm', '4 pm', '6 pm', '8 pm', '10 pm'];
+  const hourlyTimes = ['12am', '2am', '4am', '6am', '8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm', '10pm'];
   const gridColumnsClass = `grid-cols-[40px_60px_60px_1fr_60px_60px_1fr_60px_repeat(12,40px)_1fr]`;
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-xl max-w-full mx-auto font-sans text-xs">
+    <div ref={formRef} className="bg-white p-6 rounded-lg shadow-xl max-w-full mx-auto font-sans text-xs">
       <div className="text-center mb-6">
         <h1 className="font-bold text-2xl uppercase">Daily Drug Chart</h1>
         <p className="text-sm text-gray-500">
           <span className="font-semibold">Medford Multi Speciality Hospital</span>
         </p>
       </div>
-      
+
+      <PatientDetailsHeader ipdId={ipdId} />
+
       {/* Header Fields */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
         <div className="flex items-center">
@@ -293,7 +298,7 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
           <input type="text" value={headerInfo.nutrition} onChange={(e) => handleHeaderChange(e, 'nutrition')} className="flex-grow p-1 border-b border-gray-400 focus:outline-none" />
         </div>
       </div>
-      
+
       {/* Table Header */}
       <div className="border border-gray-400 rounded-md overflow-hidden">
         <div className={`grid ${gridColumnsClass} bg-gray-200 font-bold text-center`}>
@@ -338,7 +343,7 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
         </div>
       </div>
 
-      <div className="flex justify-between items-center mt-6">
+      <div className="flex justify-between items-center mt-6 no-pdf">
         <div className="flex gap-2">
           <button onClick={addRow} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-blue-500 hover:bg-blue-600">
             <PlusCircle className="h-4 w-4" /> Add Row
@@ -347,13 +352,16 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
             <MinusCircle className="h-4 w-4" /> Remove Row
           </button>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
-        >
-          {isSaving ? ( <> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </> ) : ( "Save Drug Chart" )}
-        </button>
+        <div className="flex space-x-4">
+          <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="DrugChartSheet" />
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
+          >
+            {isSaving ? (<> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </>) : ("Save Drug Chart")}
+          </button>
+        </div>
       </div>
 
       {/* Static Footer Section */}
@@ -367,12 +375,12 @@ const DrugChartSheet = ({ ipdId }: { ipdId: string }) => {
           <p>8 Hourly- 6 am / 2 pm / 10 pm</p>
         </CardContent>
       </Card>
-      
+
       {/* UPDATED: Signature Section */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mt-8 text-sm">
-          {renderSignatureArea('chartFilledBySign', 'Chart Filled By')}
-          {renderSignatureArea('chartAuditedBySign', 'Chart Audited By')}
-          {renderSignatureArea('consultantSign', 'Consultant Sign')}
+        {renderSignatureArea('chartFilledBySign', 'Chart Filled By')}
+        {renderSignatureArea('chartAuditedBySign', 'Chart Audited By')}
+        {renderSignatureArea('consultantSign', 'Consultant Sign')}
       </div>
 
     </div>

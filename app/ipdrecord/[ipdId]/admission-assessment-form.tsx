@@ -1,9 +1,12 @@
+// Filename: patient-admission-assessment-sheet.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { RefreshCw } from 'lucide-react';
+import PatientDetailsHeader from "./PatientDetailsHeader"; // Import the new header component
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 // --- Type Definitions ---
 interface PatientAdmissionData {
@@ -57,7 +60,8 @@ interface PatientAdmissionData {
 
   // Neurologic
   neurologicSpeech: { clear: boolean; slurred: boolean; };
-  loc: { oriented: boolean; drowsy: boolean; sedated: boolean; unresponsive: boolean;
+  loc: {
+    oriented: boolean; drowsy: boolean; sedated: boolean; unresponsive: boolean;
     afterLimited: boolean; disoriented: boolean; other: boolean; hearingImpairment: boolean; noLimitations: boolean;
   };
   gcs: string;
@@ -107,7 +111,7 @@ interface PatientAdmissionData {
   integumentColour: { cool: boolean; warm: boolean; };
   integumentVitals: string; // Vitals input
   integumentCrurn: { intact: boolean; redness: boolean; peelSore: boolean; };
-  integumentCrurnHeel: { intact: boolean; redness: boolean; peelSore: boolean; };
+  integumentCrurnHeel: { intact: boolean; redness: false, peelSore: boolean; };
   leftArm: string;
   rightArm: string;
   leftLeg: string;
@@ -178,7 +182,8 @@ const initialPatientAdmissionData: PatientAdmissionData = {
 
   // Neurologic
   neurologicSpeech: { clear: false, slurred: false, },
-  loc: { oriented: false, drowsy: false, sedated: false, unresponsive: false,
+  loc: {
+    oriented: false, drowsy: false, sedated: false, unresponsive: false,
     afterLimited: false, disoriented: false, other: false, hearingImpairment: false, noLimitations: false
   },
   gcs: '',
@@ -253,6 +258,8 @@ const PatientAdmissionAssessmentSheet = ({ ipdId }: { ipdId: string }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isVerifyingSignature, setIsVerifyingSignature] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null); // Create the ref for the form content
+
 
   // --- Data Fetching Function ---
   const fetchAssessmentData = useCallback(async () => {
@@ -292,7 +299,7 @@ const PatientAdmissionAssessmentSheet = ({ ipdId }: { ipdId: string }) => {
         .select('signature_url')
         .eq('password', password)
         .single();
-      
+
       if (error && error.code !== 'PGRST116') throw error;
 
       if (data?.signature_url) {
@@ -305,7 +312,7 @@ const PatientAdmissionAssessmentSheet = ({ ipdId }: { ipdId: string }) => {
       console.error("Error verifying signature:", error);
       toast.error("Could not verify signature.");
     } finally {
-        setIsVerifyingSignature(false);
+      setIsVerifyingSignature(false);
     }
   }, []);
 
@@ -348,20 +355,20 @@ const PatientAdmissionAssessmentSheet = ({ ipdId }: { ipdId: string }) => {
     const isCheckbox = type === 'checkbox';
     // @ts-ignore - 'checked' exists on HTMLInputElement
     const checked = e.target.checked;
-    
+
     const finalValue = isCheckbox ? checked : value;
-    
+
     setFormData(prevData => ({ ...prevData, [field]: finalValue }));
 
     if (field === 'footerRnSign' && typeof value === 'string' && value.length === 10) {
-        checkAndSetSignature(value);
+      checkAndSetSignature(value);
     }
   };
-  
+
   const handleSignatureReset = () => {
     if (window.confirm("Are you sure you want to remove this signature?")) {
-        setFormData(prev => ({...prev, footerRnSign: ''}));
-        toast.info("Signature has been cleared.");
+      setFormData(prev => ({ ...prev, footerRnSign: '' }));
+      toast.info("Signature has been cleared.");
     }
   };
 
@@ -371,13 +378,13 @@ const PatientAdmissionAssessmentSheet = ({ ipdId }: { ipdId: string }) => {
       const newGroup = { ...(prevData[group] as any) };
       // For groups where multiple selections are allowed
       const multiSelectGroups = ['arrivalBy', 'admittedFrom', 'habits', 'medicalHistory', 'anyImplants', 'activityExercise', 'respirations', 'cardioColour', 'cardioSteth', 'cardioPedalPulse', 'cardioChestPain', 'cardioDVT', 'secretions', 'abdomen', 'diet', 'bowelSounds', 'integumentColour', 'integumentCrurn', 'integumentCrurnHeel', 'urinarySection', 'urinaryIfVoiding', 'loc', 'cough'];
-      
+
       if (multiSelectGroups.includes(group)) {
         newGroup[field] = checked;
       } else { // For groups that act like radios but are checkboxes
-          for (let key in newGroup) {
-              (newGroup as any)[key] = (key === field) ? checked : false;
-          }
+        for (let key in newGroup) {
+          (newGroup as any)[key] = (key === field) ? checked : false;
+        }
       }
       return { ...prevData, [group]: newGroup };
     });
@@ -387,8 +394,8 @@ const PatientAdmissionAssessmentSheet = ({ ipdId }: { ipdId: string }) => {
     setFormData(prevData => {
       const newGroup = { ...(prevData[group] as any) };
       for (const key in newGroup) {
-        if(typeof newGroup[key] === 'boolean'){
-            newGroup[key] = false;
+        if (typeof newGroup[key] === 'boolean') {
+          newGroup[key] = false;
         }
       }
       newGroup[field] = value;
@@ -429,617 +436,599 @@ const PatientAdmissionAssessmentSheet = ({ ipdId }: { ipdId: string }) => {
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-xl max-w-full mx-auto font-sans text-xs">
-      {/* Patient Header */}
-      <div className="border border-gray-300 p-4 rounded-md mb-4">
-        <h2 className="font-bold text-xl uppercase mb-2">Patient Admission Assessment Form (NURSING)</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="flex items-center">
-            <span className="font-semibold w-24">Patient Name:</span>
-            <input type="text" value={formData.patientName} onChange={(e) => handleInputChange(e, 'patientName')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-16">Age / Sex:</span>
-            <input type="text" value={formData.ageSex} onChange={(e) => handleInputChange(e, 'ageSex')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-24">Room / Ward No:</span>
-            <input type="text" value={formData.roomWardNo} onChange={(e) => handleInputChange(e, 'roomWardNo')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-16">UHID No:</span>
-            <input type="text" value={formData.uhidNo} onChange={(e) => handleInputChange(e, 'uhidNo')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-16">IPD No:</span>
-            <input type="text" value={formData.ipdNo} onChange={(e) => handleInputChange(e, 'ipdNo')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-16">D.O.A:</span>
-            <input type="date" value={formData.doa} onChange={(e) => handleInputChange(e, 'doa')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
-          <div className="flex items-center col-span-full md:col-span-2">
-            <span className="font-semibold w-24">Consultant:</span>
-            <input type="text" value={formData.consultant} onChange={(e) => handleInputChange(e, 'consultant')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
+      <div ref={contentRef}> {/* Wrap the entire form with the ref */}
+        <div className="text-center mb-6">
+          <h1 className="font-bold text-2xl uppercase">Patient Admission Assessment Form (NURSING)</h1>
         </div>
-      </div>
-      
-      {/* Date of Assessment Section 1 */}
-      <div className={sectionClass}>
-        <label className={labelClass}>Date of Assessment:</label>
-        <input type="date" value={formData.assessmentDate1} onChange={(e) => handleInputChange(e, 'assessmentDate1')} className={inputClass + " mb-2"} />
-        
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-          <div>
-            <span className={labelClass}>Arrival to unit by:</span>
-            <div className="space-y-1 mt-1">
-              <label className="flex items-center">
-                <input type="checkbox" checked={formData.arrivalBy.walking} onChange={(e) => handleCheckboxChange('arrivalBy', 'walking', e.target.checked)} className="mr-2" /> Walking
-              </label>
-              <label className="flex items-center">
-                <input type="checkbox" checked={formData.arrivalBy.wheelchair} onChange={(e) => handleCheckboxChange('arrivalBy', 'wheelchair', e.target.checked)} className="mr-2" /> Wheel Chair
-              </label>
-              <label className="flex items-center">
-                <input type="checkbox" checked={formData.arrivalBy.stretcher} onChange={(e) => handleCheckboxChange('arrivalBy', 'stretcher', e.target.checked)} className="mr-2" /> Stretcher
-              </label>
-            </div>
-          </div>
-          <div>
-            <span className={labelClass}>Admitted from:</span>
-            <div className="space-y-1 mt-1">
-              <label className="flex items-center">
-                <input type="checkbox" checked={formData.admittedFrom.home} onChange={(e) => handleCheckboxChange('admittedFrom', 'home', e.target.checked)} className="mr-2" /> Home
-              </label>
-              <label className="flex items-center">
-                <input type="checkbox" checked={formData.admittedFrom.clinic} onChange={(e) => handleCheckboxChange('admittedFrom', 'clinic', e.target.checked)} className="mr-2" /> Clinic
-              </label>
-              <label className="flex items-center">
-                <input type="checkbox" checked={formData.admittedFrom.nursingHome} onChange={(e) => handleCheckboxChange('admittedFrom', 'nursingHome', e.target.checked)} className="mr-2" /> Nursing Home
-              </label>
-              <label className="flex items-center">
-                <input type="checkbox" checked={formData.admittedFrom.casualty} onChange={(e) => handleCheckboxChange('admittedFrom', 'casualty', e.target.checked)} className="mr-2" /> Casualty
-              </label>
-            </div>
-          </div>
-          <div>
-            <span className={labelClass}>Patient Belonging Handed to Relative:</span>
-            <div className="space-y-1 mt-1">
-              <label className="flex items-center">
-                <input type="radio" name="belongings" checked={formData.belongingsHandedToRelative.yes} onChange={() => handleRadioChange('belongingsHandedToRelative', 'yes', true)} className="mr-2" /> Yes
-              </label>
-              <label className="flex items-center">
-                <input type="radio" name="belongings" checked={formData.belongingsHandedToRelative.no} onChange={() => handleRadioChange('belongingsHandedToRelative', 'no', true)} className="mr-2" /> No
-              </label>
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center mb-2">
-              <span className="font-semibold w-24">Informant Name:</span>
-              <input type="text" value={formData.informantName} onChange={(e) => handleInputChange(e, 'informantName')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-            </div>
-            <div className="flex items-center">
-              <span className="font-semibold w-24">Relationship:</span>
-              <input type="text" value={formData.relationship} onChange={(e) => handleInputChange(e, 'relationship')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Date of Assessment Section 2 */}
-      <div className={sectionClass}>
-        <label className={labelClass}>Date of Assessment:</label>
-        <input type="date" value={formData.assessmentDate2} onChange={(e) => handleInputChange(e, 'assessmentDate2')} className={inputClass + " mb-2"} />
         
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-          <div>
-            <span className={labelClass}>Any Allergies:</span>
-            <div className="space-y-1 mt-1">
-              <label className="flex items-center">
-                <input type="radio" name="allergies" checked={formData.allergies.yes} onChange={() => handleRadioChange('allergies', 'yes', true)} className="mr-2" /> Yes
-              </label>
-              <label className="flex items-center">
-                <input type="radio" name="allergies" checked={formData.allergies.no} onChange={() => handleRadioChange('allergies', 'no', true)} className="mr-2" /> No
-              </label>
-              {formData.allergies.yes && (
-                <textarea value={formData.allergiesIfYes} onChange={(e) => handleInputChange(e, 'allergiesIfYes')} placeholder="If yes, provide details..." className="w-full h-10 p-1 border border-gray-300 rounded focus:outline-none resize-none" />
-              )}
-            </div>
-          </div>
-          <div>
-            <span className={labelClass}>Latex Allergy:</span>
-            <div className="space-y-1 mt-1">
-              <label className="flex items-center">
-                <input type="radio" name="latexAllergy" checked={formData.latexAllergy.yes} onChange={() => handleRadioChange('latexAllergy', 'yes', true)} className="mr-2" /> Yes
-              </label>
-              <label className="flex items-center">
-                <input type="radio" name="latexAllergy" checked={formData.latexAllergy.no} onChange={() => handleRadioChange('latexAllergy', 'no', true)} className="mr-2" /> No
-              </label>
-            </div>
-          </div>
-          <div>
-            <span className={labelClass}>Medications:</span>
-            <div className="space-y-1 mt-1">
-              <label className="flex items-center">
-                <input type="radio" name="medications" checked={formData.medications.yes} onChange={() => handleRadioChange('medications', 'yes', true)} className="mr-2" /> Yes
-              </label>
-              <label className="flex items-center">
-                <input type="radio" name="medications" checked={formData.medications.no} onChange={() => handleRadioChange('medications', 'no', true)} className="mr-2" /> No
-              </label>
-              {formData.medications.yes && (
-                <textarea value={formData.medicationsIfYes} onChange={(e) => handleInputChange(e, 'medicationsIfYes')} placeholder="If yes, provide details..." className="w-full h-10 p-1 border border-gray-300 rounded focus:outline-none resize-none" />
-              )}
-            </div>
-          </div>
-          <div>
-            <span className={labelClass}>Food:</span>
-            {renderRadioGroup('food', ['yes', 'no'], ['Yes', 'No'])}
-            <span className={labelClass}>Habits:</span>
-            <div className="space-y-1 mt-1">
-              <label className="flex items-center">
-                <input type="checkbox" checked={formData.habits.alcohol} onChange={(e) => handleCheckboxChange('habits', 'alcohol', e.target.checked)} className="mr-2" /> Alcohol
-              </label>
-              <label className="flex items-center">
-                <input type="checkbox" checked={formData.habits.smoking} onChange={(e) => handleCheckboxChange('habits', 'smoking', e.target.checked)} className="mr-2" /> Smoking
-              </label>
-            </div>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
-          <div className="col-span-full">
-            <span className={labelClass}>Medical History:</span>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-1">
-              {Object.keys(formData.medicalHistory).map(key => (
-                <label key={key} className="flex items-center capitalize">
-                  <input type="checkbox" checked={(formData.medicalHistory as any)[key]} onChange={(e) => handleCheckboxChange('medicalHistory', key, e.target.checked)} className="mr-2" />
-                  {key.replace(/([A-Z])/g, ' $1').trim()}
+        <PatientDetailsHeader ipdId={ipdId} />
+
+
+        {/* Date of Assessment Section 1 */}
+        <div className={sectionClass}>
+          <label className={labelClass}>Date of Assessment:</label>
+          <input type="date" value={formData.assessmentDate1} onChange={(e) => handleInputChange(e, 'assessmentDate1')} className={inputClass + " mb-2"} />
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+            <div>
+              <span className={labelClass}>Arrival to unit by:</span>
+              <div className="space-y-1 mt-1">
+                <label className="flex items-center">
+                  <input type="checkbox" checked={formData.arrivalBy.walking} onChange={(e) => handleCheckboxChange('arrivalBy', 'walking', e.target.checked)} className="mr-2" /> Walking
                 </label>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Pregnancy & Major Illness */}
-      <div className={sectionClass}>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <span className={labelClass}>On Any Medications:</span>
-            {renderRadioGroup('onAnyMedications', ['yes', 'no'], ['Yes', 'No'])}
-          </div>
-          <div className="col-span-3">
-            <span className={labelClass}>Are You Pregnant:</span>
-            <div className="flex items-center space-x-4 mt-2">
-              <label className="flex items-center">
-                <input type="radio" name="pregnant" checked={formData.areYouPregnant.notApplicable} onChange={() => handleRadioChange('areYouPregnant', 'notApplicable', true)} className="mr-2" /> Not Applicable
-              </label>
-              <label className="flex items-center">
-                <input type="radio" name="pregnant" checked={formData.areYouPregnant.yes} onChange={() => handleRadioChange('areYouPregnant', 'yes', true)} className="mr-2" /> Yes
-              </label>
-              <label className="flex items-center">
-                <input type="radio" name="pregnant" checked={formData.areYouPregnant.no} onChange={() => handleRadioChange('areYouPregnant', 'no', true)} className="mr-2" /> No
-              </label>
-              <span className="font-semibold">LMP:</span>
-              <input type="text" value={formData.lmp} onChange={(e) => handleInputChange(e, 'lmp')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-            </div>
-          </div>
-          <div className="col-span-full mt-2">
-            <div className="flex items-center">
-              <span className="font-semibold w-40">Major Illness / Surgery / Accidents:</span>
-              <input type="text" value={formData.majorIllness} onChange={(e) => handleInputChange(e, 'majorIllness')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-            </div>
-            <div className="flex items-center mt-2">
-              <span className="font-semibold w-40">Date / Event:</span>
-              <input type="text" value={formData.majorIllnessDate} onChange={(e) => handleInputChange(e, 'majorIllnessDate')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Implants & Activity */}
-      <div className={sectionClass}>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="col-span-full">
-            <span className={labelClass}>Any Implants:</span>
-            <div className="flex items-center space-x-4 mt-1">
-              <label className="flex items-center"><input type="checkbox" checked={formData.anyImplants.prosthesis} onChange={(e) => handleCheckboxChange('anyImplants', 'prosthesis', e.target.checked)} className="mr-2" /> Prosthesis</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.anyImplants.pacemaker} onChange={(e) => handleCheckboxChange('anyImplants', 'pacemaker', e.target.checked)} className="mr-2" /> Pacemaker</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.anyImplants.aicd} onChange={(e) => handleCheckboxChange('anyImplants', 'aicd', e.target.checked)} className="mr-2" /> AICD</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.anyImplants.anyOther} onChange={(e) => handleCheckboxChange('anyImplants', 'anyOther', e.target.checked)} className="mr-2" /> Any Other</label>
-            </div>
-          </div>
-          <div className="col-span-full">
-            <span className={labelClass}>Activity & Exercise:</span>
-            <div className="flex items-center space-x-4 mt-1">
-              <label className="flex items-center"><input type="checkbox" checked={formData.activityExercise.walking} onChange={(e) => handleCheckboxChange('activityExercise', 'walking', e.target.checked)} className="mr-2" /> Walking</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.activityExercise.walker} onChange={(e) => handleCheckboxChange('activityExercise', 'walker', e.target.checked)} className="mr-2" /> Walker</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.activityExercise.cane} onChange={(e) => handleCheckboxChange('activityExercise', 'cane', e.target.checked)} className="mr-2" /> Cane</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.activityExercise.other} onChange={(e) => handleCheckboxChange('activityExercise', 'other', e.target.checked)} className="mr-2" /> Other</label>
-            </div>
-          </div>
-          <div className="col-span-full">
-            <span className={labelClass}>Requires Assisting Devices:</span>
-            {renderRadioGroup('requiresAssistingDevices', ['yes', 'no'], ['Yes', 'No'])}
-          </div>
-          <div className="col-span-full">
-            <span className={labelClass}>Difficulty with *ADL:</span>
-            {renderRadioGroup('difficultyWithADL', ['no', 'yes'], ['No', 'Yes'])}
-            <div className="flex flex-wrap items-center space-x-4 mt-2">
-              <span className="font-semibold mr-2">Activities of Daily Living:</span>
-              <label className="flex items-center"><input type="checkbox" checked={formData.adlBathing} onChange={(e) => setFormData({...formData, adlBathing: e.target.checked})} className="mr-2" /> Bathing</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.adlToileting} onChange={(e) => setFormData({...formData, adlToileting: e.target.checked})} className="mr-2" /> Toileting</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.adlClimbingStairs} onChange={(e) => setFormData({...formData, adlClimbingStairs: e.target.checked})} className="mr-2" /> Climbing Stairs</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.adlWalking} onChange={(e) => setFormData({...formData, adlWalking: e.target.checked})} className="mr-2" /> Walking</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.adlFeeding} onChange={(e) => setFormData({...formData, adlFeeding: e.target.checked})} className="mr-2" /> Feeding</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.adlHouseChores} onChange={(e) => setFormData({...formData, adlHouseChores: e.target.checked})} className="mr-2" /> House Chores</label>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Neurologic Assessment */}
-      <div className={sectionClass}>
-        <h3 className="font-semibold uppercase mb-2">Neurologic Assessment</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <div className="flex items-center mb-2">
-              <span className="font-semibold w-24">Speech:</span>
-              <div className="flex-grow flex space-x-4">
-                <label className="flex items-center"><input type="radio" name="speech" checked={formData.neurologicSpeech.clear} onChange={() => handleRadioChange('neurologicSpeech', 'clear', true)} className="mr-2" /> Clear</label>
-                <label className="flex items-center"><input type="radio" name="speech" checked={formData.neurologicSpeech.slurred} onChange={() => handleRadioChange('neurologicSpeech', 'slurred', true)} className="mr-2" /> Slurred</label>
+                <label className="flex items-center">
+                  <input type="checkbox" checked={formData.arrivalBy.wheelchair} onChange={(e) => handleCheckboxChange('arrivalBy', 'wheelchair', e.target.checked)} className="mr-2" /> Wheel Chair
+                </label>
+                <label className="flex items-center">
+                  <input type="checkbox" checked={formData.arrivalBy.stretcher} onChange={(e) => handleCheckboxChange('arrivalBy', 'stretcher', e.target.checked)} className="mr-2" /> Stretcher
+                </label>
               </div>
             </div>
-            <div className="flex items-center mb-2">
-              <span className="font-semibold w-24">*LOC</span>
-              <div className="flex-grow grid grid-cols-2 gap-2">
-                <label className="flex items-center"><input type="checkbox" checked={formData.loc.oriented} onChange={(e) => handleCheckboxChange('loc', 'oriented', e.target.checked)} className="mr-2" /> Oriented</label>
-                <label className="flex items-center"><input type="checkbox" checked={formData.loc.drowsy} onChange={(e) => handleCheckboxChange('loc', 'drowsy', e.target.checked)} className="mr-2" /> Drowsy</label>
-                <label className="flex items-center"><input type="checkbox" checked={formData.loc.afterLimited} onChange={(e) => handleCheckboxChange('loc', 'afterLimited', e.target.checked)} className="mr-2" /> After / Limited</label>
-                <label className="flex items-center"><input type="checkbox" checked={formData.loc.sedated} onChange={(e) => handleCheckboxChange('loc', 'sedated', e.target.checked)} className="mr-2" /> Sedated</label>
-                <label className="flex items-center"><input type="checkbox" checked={formData.loc.disoriented} onChange={(e) => handleCheckboxChange('loc', 'disoriented', e.target.checked)} className="mr-2" /> Disoriented</label>
-                <label className="flex items-center"><input type="checkbox" checked={formData.loc.unresponsive} onChange={(e) => handleCheckboxChange('loc', 'unresponsive', e.target.checked)} className="mr-2" /> Unresponsive</label>
-                <label className="flex items-center"><input type="checkbox" checked={formData.loc.noLimitations} onChange={(e) => handleCheckboxChange('loc', 'noLimitations', e.target.checked)} className="mr-2" /> No Limitations</label>
-                <label className="flex items-center"><input type="checkbox" checked={formData.loc.other} onChange={(e) => handleCheckboxChange('loc', 'other', e.target.checked)} className="mr-2" /> Other</label>
-                <label className="flex items-center col-span-2"><input type="checkbox" checked={formData.loc.hearingImpairment} onChange={(e) => handleCheckboxChange('loc', 'hearingImpairment', e.target.checked)} className="mr-2" /> Hearing Impairment</label>
+            <div>
+              <span className={labelClass}>Admitted from:</span>
+              <div className="space-y-1 mt-1">
+                <label className="flex items-center">
+                  <input type="checkbox" checked={formData.admittedFrom.home} onChange={(e) => handleCheckboxChange('admittedFrom', 'home', e.target.checked)} className="mr-2" /> Home
+                </label>
+                <label className="flex items-center">
+                  <input type="checkbox" checked={formData.admittedFrom.clinic} onChange={(e) => handleCheckboxChange('admittedFrom', 'clinic', e.target.checked)} className="mr-2" /> Clinic
+                </label>
+                <label className="flex items-center">
+                  <input type="checkbox" checked={formData.admittedFrom.nursingHome} onChange={(e) => handleCheckboxChange('admittedFrom', 'nursingHome', e.target.checked)} className="mr-2" /> Nursing Home
+                </label>
+                <label className="flex items-center">
+                  <input type="checkbox" checked={formData.admittedFrom.casualty} onChange={(e) => handleCheckboxChange('admittedFrom', 'casualty', e.target.checked)} className="mr-2" /> Casualty
+                </label>
               </div>
             </div>
-            <div className="flex items-center">
-              <span className="font-semibold w-24">*GCS:</span>
-              <input type="text" value={formData.gcs} onChange={(e) => handleInputChange(e, 'gcs')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+            <div>
+              <span className={labelClass}>Patient Belonging Handed to Relative:</span>
+              <div className="space-y-1 mt-1">
+                <label className="flex items-center">
+                  <input type="radio" name="belongings" checked={formData.belongingsHandedToRelative.yes} onChange={() => handleRadioChange('belongingsHandedToRelative', 'yes', true)} className="mr-2" /> Yes
+                </label>
+                <label className="flex items-center">
+                  <input type="radio" name="belongings" checked={formData.belongingsHandedToRelative.no} onChange={() => handleRadioChange('belongingsHandedToRelative', 'no', true)} className="mr-2" /> No
+                </label>
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center mb-2">
+                <span className="font-semibold w-24">Informant Name:</span>
+                <input type="text" value={formData.informantName} onChange={(e) => handleInputChange(e, 'informantName')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              </div>
+              <div className="flex items-center">
+                <span className="font-semibold w-24">Relationship:</span>
+                <input type="text" value={formData.relationship} onChange={(e) => handleInputChange(e, 'relationship')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              </div>
             </div>
           </div>
         </div>
-        <div className="flex items-center mt-4">
-          <span className="font-semibold w-48">Pain Assessment Score (From 0-10):</span>
-          <input type="text" value={formData.painAssessmentScore} onChange={(e) => handleInputChange(e, 'painAssessmentScore')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
-          <span className="font-semibold w-16">Location:</span>
-          <input type="text" value={formData.painLocation} onChange={(e) => handleInputChange(e, 'painLocation')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-        </div>
-      </div>
 
-      {/* Cardiovascular Assessments */}
-      <div className={sectionClass}>
-        <h3 className="font-semibold uppercase mb-2">Cardiovascular Assessments</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="col-span-full">
-            <span className={labelClass}>Colour:</span>
-            {renderRadioGroup('cardioColour', ['pink', 'pale', 'cyanotic'], ['Pink', 'Pale', 'Cyanotic'])}
+        {/* Date of Assessment Section 2 */}
+        <div className={sectionClass}>
+          <label className={labelClass}>Date of Assessment:</label>
+          <input type="date" value={formData.assessmentDate2} onChange={(e) => handleInputChange(e, 'assessmentDate2')} className={inputClass + " mb-2"} />
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+            <div>
+              <span className={labelClass}>Any Allergies:</span>
+              <div className="space-y-1 mt-1">
+                <label className="flex items-center">
+                  <input type="radio" name="allergies" checked={formData.allergies.yes} onChange={() => handleRadioChange('allergies', 'yes', true)} className="mr-2" /> Yes
+                </label>
+                <label className="flex items-center">
+                  <input type="radio" name="allergies" checked={formData.allergies.no} onChange={() => handleRadioChange('allergies', 'no', true)} className="mr-2" /> No
+                </label>
+                {formData.allergies.yes && (
+                  <textarea value={formData.allergiesIfYes} onChange={(e) => handleInputChange(e, 'allergiesIfYes')} placeholder="If yes, provide details..." className="w-full h-10 p-1 border border-gray-300 rounded focus:outline-none resize-none" />
+                )}
+              </div>
+            </div>
+            <div>
+              <span className={labelClass}>Latex Allergy:</span>
+              <div className="space-y-1 mt-1">
+                <label className="flex items-center">
+                  <input type="radio" name="latexAllergy" checked={formData.latexAllergy.yes} onChange={() => handleRadioChange('latexAllergy', 'yes', true)} className="mr-2" /> Yes
+                </label>
+                <label className="flex items-center">
+                  <input type="radio" name="latexAllergy" checked={formData.latexAllergy.no} onChange={() => handleRadioChange('latexAllergy', 'no', true)} className="mr-2" /> No
+                </label>
+              </div>
+            </div>
+            <div>
+              <span className={labelClass}>Medications:</span>
+              <div className="space-y-1 mt-1">
+                <label className="flex items-center">
+                  <input type="radio" name="medications" checked={formData.medications.yes} onChange={() => handleRadioChange('medications', 'yes', true)} className="mr-2" /> Yes
+                </label>
+                <label className="flex items-center">
+                  <input type="radio" name="medications" checked={formData.medications.no} onChange={() => handleRadioChange('medications', 'no', true)} className="mr-2" /> No
+                </label>
+                {formData.medications.yes && (
+                  <textarea value={formData.medicationsIfYes} onChange={(e) => handleInputChange(e, 'medicationsIfYes')} placeholder="If yes, provide details..." className="w-full h-10 p-1 border border-gray-300 rounded focus:outline-none resize-none" />
+                )}
+              </div>
+            </div>
+            <div>
+              <span className={labelClass}>Food:</span>
+              {renderRadioGroup('food', ['yes', 'no'], ['Yes', 'No'])}
+              <span className={labelClass}>Habits:</span>
+              <div className="space-y-1 mt-1">
+                <label className="flex items-center">
+                  <input type="checkbox" checked={formData.habits.alcohol} onChange={(e) => handleCheckboxChange('habits', 'alcohol', e.target.checked)} className="mr-2" /> Alcohol
+                </label>
+                <label className="flex items-center">
+                  <input type="checkbox" checked={formData.habits.smoking} onChange={(e) => handleCheckboxChange('habits', 'smoking', e.target.checked)} className="mr-2" /> Smoking
+                </label>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-12">Vitals:</span>
-            <span className="font-semibold mr-1">Rhythm</span>
-            <input type="checkbox" checked={formData.cardioVitalsRhythm.rhythm} onChange={(e) => setFormData({...formData, cardioVitalsRhythm: { rhythm: e.target.checked }})} className="mr-4" />
-            <span className="font-semibold mr-1">BP</span>
-            <input type="text" value={formData.cardioVitalsBP.bp} onChange={(e) => setFormData({...formData, cardioVitalsBP: { bp: e.target.value }})} className="w-20 border-b border-gray-300 focus:outline-none" />
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+            <div className="col-span-full">
+              <span className={labelClass}>Medical History:</span>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-1">
+                {Object.keys(formData.medicalHistory).map(key => (
+                  <label key={key} className="flex items-center capitalize">
+                    <input type="checkbox" checked={(formData.medicalHistory as any)[key]} onChange={(e) => handleCheckboxChange('medicalHistory', key, e.target.checked)} className="mr-2" />
+                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
-          <div>
-            <span className={labelClass}>Stethories:</span>
-            {renderRadioGroup('cardioSteth', ['warm', 'cold'], ['Warm', 'Cold'])}
+        </div>
+
+        {/* Pregnancy & Major Illness */}
+        <div className={sectionClass}>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <span className={labelClass}>On Any Medications:</span>
+              {renderRadioGroup('onAnyMedications', ['yes', 'no'], ['Yes', 'No'])}
+            </div>
+            <div className="col-span-3">
+              <span className={labelClass}>Are You Pregnant:</span>
+              <div className="flex items-center space-x-4 mt-2">
+                <label className="flex items-center">
+                  <input type="radio" name="pregnant" checked={formData.areYouPregnant.notApplicable} onChange={() => handleRadioChange('areYouPregnant', 'notApplicable', true)} className="mr-2" /> Not Applicable
+                </label>
+                <label className="flex items-center">
+                  <input type="radio" name="pregnant" checked={formData.areYouPregnant.yes} onChange={() => handleRadioChange('areYouPregnant', 'yes', true)} className="mr-2" /> Yes
+                </label>
+                <label className="flex items-center">
+                  <input type="radio" name="pregnant" checked={formData.areYouPregnant.no} onChange={() => handleRadioChange('areYouPregnant', 'no', true)} className="mr-2" /> No
+                </label>
+                <span className="font-semibold">LMP:</span>
+                <input type="text" value={formData.lmp} onChange={(e) => handleInputChange(e, 'lmp')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              </div>
+            </div>
+            <div className="col-span-full mt-2">
+              <div className="flex items-center">
+                <span className="font-semibold w-40">Major Illness / Surgery / Accidents:</span>
+                <input type="text" value={formData.majorIllness} onChange={(e) => handleInputChange(e, 'majorIllness')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              </div>
+              <div className="flex items-center mt-2">
+                <span className="font-semibold w-40">Date / Event:</span>
+                <input type="text" value={formData.majorIllnessDate} onChange={(e) => handleInputChange(e, 'majorIllnessDate')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              </div>
+            </div>
           </div>
-          <div>
-            <span className={labelClass}>Pedal Pulse Felt:</span>
-            {renderRadioGroup('cardioPedalPulse', ['feeble', 'absent'], ['Feeble', 'Absent'])}
+        </div>
+
+        {/* Implants & Activity */}
+        <div className={sectionClass}>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="col-span-full">
+              <span className={labelClass}>Any Implants:</span>
+              <div className="flex items-center space-x-4 mt-1">
+                <label className="flex items-center"><input type="checkbox" checked={formData.anyImplants.prosthesis} onChange={(e) => handleCheckboxChange('anyImplants', 'prosthesis', e.target.checked)} className="mr-2" /> Prosthesis</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.anyImplants.pacemaker} onChange={(e) => handleCheckboxChange('anyImplants', 'pacemaker', e.target.checked)} className="mr-2" /> Pacemaker</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.anyImplants.aicd} onChange={(e) => handleCheckboxChange('anyImplants', 'aicd', e.target.checked)} className="mr-2" /> AICD</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.anyImplants.anyOther} onChange={(e) => handleCheckboxChange('anyImplants', 'anyOther', e.target.checked)} className="mr-2" /> Any Other</label>
+              </div>
+            </div>
+            <div className="col-span-full">
+              <span className={labelClass}>Activity & Exercise:</span>
+              <div className="flex items-center space-x-4 mt-1">
+                <label className="flex items-center"><input type="checkbox" checked={formData.activityExercise.walking} onChange={(e) => handleCheckboxChange('activityExercise', 'walking', e.target.checked)} className="mr-2" /> Walking</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.activityExercise.walker} onChange={(e) => handleCheckboxChange('activityExercise', 'walker', e.target.checked)} className="mr-2" /> Walker</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.activityExercise.cane} onChange={(e) => handleCheckboxChange('activityExercise', 'cane', e.target.checked)} className="mr-2" /> Cane</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.activityExercise.other} onChange={(e) => handleCheckboxChange('activityExercise', 'other', e.target.checked)} className="mr-2" /> Other</label>
+              </div>
+            </div>
+            <div className="col-span-full">
+              <span className={labelClass}>Requires Assisting Devices:</span>
+              {renderRadioGroup('requiresAssistingDevices', ['yes', 'no'], ['Yes', 'No'])}
+            </div>
+            <div className="col-span-full">
+              <span className={labelClass}>Difficulty with *ADL:</span>
+              {renderRadioGroup('difficultyWithADL', ['no', 'yes'], ['No', 'Yes'])}
+              <div className="flex flex-wrap items-center space-x-4 mt-2">
+                <span className="font-semibold mr-2">Activities of Daily Living:</span>
+                <label className="flex items-center"><input type="checkbox" checked={formData.adlBathing} onChange={(e) => setFormData({ ...formData, adlBathing: e.target.checked })} className="mr-2" /> Bathing</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.adlToileting} onChange={(e) => setFormData({ ...formData, adlToileting: e.target.checked })} className="mr-2" /> Toileting</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.adlClimbingStairs} onChange={(e) => setFormData({ ...formData, adlClimbingStairs: e.target.checked })} className="mr-2" /> Climbing Stairs</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.adlWalking} onChange={(e) => setFormData({ ...formData, adlWalking: e.target.checked })} className="mr-2" /> Walking</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.adlFeeding} onChange={(e) => setFormData({ ...formData, adlFeeding: e.target.checked })} className="mr-2" /> Feeding</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.adlHouseChores} onChange={(e) => setFormData({ ...formData, adlHouseChores: e.target.checked })} className="mr-2" /> House Chores</label>
+              </div>
+            </div>
           </div>
-          <div className="col-span-full">
-            <span className={labelClass}>Edema:</span>
-            <div className="flex items-center space-x-4 mt-1">
-              <label className="flex items-center"><input type="radio" name="edema" checked={formData.cardioEdema.absent} onChange={() => handleRadioChange('cardioEdema', 'absent', true)} className="mr-2" /> Absent</label>
-              <label className="flex items-center"><input type="radio" name="edema" checked={formData.cardioEdema.present} onChange={() => handleRadioChange('cardioEdema', 'present', true)} className="mr-2" /> Present</label>
-              {formData.cardioEdema.present && (
-                <div className="flex-grow flex items-center">
-                  <span className="font-semibold mr-2">If Present Site:</span>
-                  <input type="text" value={formData.cardioEdema.ifPresentSite} onChange={(e) => setFormData({...formData, cardioEdema: {...formData.cardioEdema, ifPresentSite: e.target.value}})} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+        </div>
+
+        {/* Neurologic Assessment */}
+        <div className={sectionClass}>
+          <h3 className="font-semibold uppercase mb-2">Neurologic Assessment</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <div className="flex items-center mb-2">
+                <span className="font-semibold w-24">Speech:</span>
+                <div className="flex-grow flex space-x-4">
+                  <label className="flex items-center"><input type="radio" name="speech" checked={formData.neurologicSpeech.clear} onChange={() => handleRadioChange('neurologicSpeech', 'clear', true)} className="mr-2" /> Clear</label>
+                  <label className="flex items-center"><input type="radio" name="speech" checked={formData.neurologicSpeech.slurred} onChange={() => handleRadioChange('neurologicSpeech', 'slurred', true)} className="mr-2" /> Slurred</label>
                 </div>
-              )}
+              </div>
+              <div className="flex items-center mb-2">
+                <span className="font-semibold w-24">*LOC</span>
+                <div className="flex-grow grid grid-cols-2 gap-2">
+                  <label className="flex items-center"><input type="checkbox" checked={formData.loc.oriented} onChange={(e) => handleCheckboxChange('loc', 'oriented', e.target.checked)} className="mr-2" /> Oriented</label>
+                  <label className="flex items-center"><input type="checkbox" checked={formData.loc.drowsy} onChange={(e) => handleCheckboxChange('loc', 'drowsy', e.target.checked)} className="mr-2" /> Drowsy</label>
+                  <label className="flex items-center"><input type="checkbox" checked={formData.loc.afterLimited} onChange={(e) => handleCheckboxChange('loc', 'afterLimited', e.target.checked)} className="mr-2" /> After / Limited</label>
+                  <label className="flex items-center"><input type="checkbox" checked={formData.loc.sedated} onChange={(e) => handleCheckboxChange('loc', 'sedated', e.target.checked)} className="mr-2" /> Sedated</label>
+                  <label className="flex items-center"><input type="checkbox" checked={formData.loc.disoriented} onChange={(e) => handleCheckboxChange('loc', 'disoriented', e.target.checked)} className="mr-2" /> Disoriented</label>
+                  <label className="flex items-center"><input type="checkbox" checked={formData.loc.unresponsive} onChange={(e) => handleCheckboxChange('loc', 'unresponsive', e.target.checked)} className="mr-2" /> Unresponsive</label>
+                  <label className="flex items-center"><input type="checkbox" checked={formData.loc.noLimitations} onChange={(e) => handleCheckboxChange('loc', 'noLimitations', e.target.checked)} className="mr-2" /> No Limitations</label>
+                  <label className="flex items-center"><input type="checkbox" checked={formData.loc.other} onChange={(e) => handleCheckboxChange('loc', 'other', e.target.checked)} className="mr-2" /> Other</label>
+                  <label className="flex items-center col-span-2"><input type="checkbox" checked={formData.loc.hearingImpairment} onChange={(e) => handleCheckboxChange('loc', 'hearingImpairment', e.target.checked)} className="mr-2" /> Hearing Impairment</label>
+                </div>
+              </div>
+              <div className="flex items-center">
+                <span className="font-semibold w-24">*GCS:</span>
+                <input type="text" value={formData.gcs} onChange={(e) => handleInputChange(e, 'gcs')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              </div>
             </div>
           </div>
-          <div className="col-span-full">
-            <span className={labelClass}>Chest Pain:</span>
-            {renderRadioGroup('cardioChestPain', ['absent', 'present'], ['Absent', 'Present'])}
-          </div>
-          <div className="col-span-full">
-            <span className={labelClass}>DVT:</span>
-            {renderRadioGroup('cardioDVT', ['none', 'low', 'med', 'high'], ['None', 'Low', 'Med', 'High'])}
+          <div className="flex items-center mt-4">
+            <span className="font-semibold w-48">Pain Assessment Score (From 0-10):</span>
+            <input type="text" value={formData.painAssessmentScore} onChange={(e) => handleInputChange(e, 'painAssessmentScore')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
+            <span className="font-semibold w-16">Location:</span>
+            <input type="text" value={formData.painLocation} onChange={(e) => handleInputChange(e, 'painLocation')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
           </div>
         </div>
-      </div>
-      
-      {/* Respiratory Assessment */}
-      <div className={sectionClass}>
-        <h3 className="font-semibold uppercase mb-2">Respiratory Assessment</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="col-span-full">
-            <span className={labelClass}>Respirations:</span>
-            <div className="flex items-center space-x-4 mt-1">
-              {Object.keys(formData.respirations).map(key => (
+
+        {/* Cardiovascular Assessments */}
+        <div className={sectionClass}>
+          <h3 className="font-semibold uppercase mb-2">Cardiovascular Assessments</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="col-span-full">
+              <span className={labelClass}>Colour:</span>
+              {renderRadioGroup('cardioColour', ['pink', 'pale', 'cyanotic'], ['Pink', 'Pale', 'Cyanotic'])}
+            </div>
+            <div className="flex items-center">
+              <span className="font-semibold w-12">Vitals:</span>
+              <span className="font-semibold mr-1">Rhythm</span>
+              <input type="checkbox" checked={formData.cardioVitalsRhythm.rhythm} onChange={(e) => setFormData({ ...formData, cardioVitalsRhythm: { rhythm: e.target.checked } })} className="mr-4" />
+              <span className="font-semibold mr-1">BP</span>
+              <input type="text" value={formData.cardioVitalsBP.bp} onChange={(e) => setFormData({ ...formData, cardioVitalsBP: { bp: e.target.value } })} className="w-20 border-b border-gray-300 focus:outline-none" />
+            </div>
+            <div>
+              <span className={labelClass}>Stethories:</span>
+              {renderRadioGroup('cardioSteth', ['warm', 'cold'], ['Warm', 'Cold'])}
+            </div>
+            <div>
+              <span className={labelClass}>Pedal Pulse Felt:</span>
+              {renderRadioGroup('cardioPedalPulse', ['feeble', 'absent'], ['Feeble', 'Absent'])}
+            </div>
+            <div className="col-span-full">
+              <span className={labelClass}>Edema:</span>
+              <div className="flex items-center space-x-4 mt-1">
+                <label className="flex items-center"><input type="radio" name="edema" checked={formData.cardioEdema.absent} onChange={() => handleRadioChange('cardioEdema', 'absent', true)} className="mr-2" /> Absent</label>
+                <label className="flex items-center"><input type="radio" name="edema" checked={formData.cardioEdema.present} onChange={() => handleRadioChange('cardioEdema', 'present', true)} className="mr-2" /> Present</label>
+                {formData.cardioEdema.present && (
+                  <div className="flex-grow flex items-center">
+                    <span className="font-semibold mr-2">If Present Site:</span>
+                    <input type="text" value={formData.cardioEdema.ifPresentSite} onChange={(e) => setFormData({ ...formData, cardioEdema: { ...formData.cardioEdema, ifPresentSite: e.target.value } })} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="col-span-full">
+              <span className={labelClass}>Chest Pain:</span>
+              {renderRadioGroup('cardioChestPain', ['absent', 'present'], ['Absent', 'Present'])}
+            </div>
+            <div className="col-span-full">
+              <span className={labelClass}>DVT:</span>
+              {renderRadioGroup('cardioDVT', ['none', 'low', 'med', 'high'], ['None', 'Low', 'Med', 'High'])}
+            </div>
+          </div>
+        </div>
+
+        {/* Respiratory Assessment */}
+        <div className={sectionClass}>
+          <h3 className="font-semibold uppercase mb-2">Respiratory Assessment</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="col-span-full">
+              <span className={labelClass}>Respirations:</span>
+              <div className="flex items-center space-x-4 mt-1">
+                {Object.keys(formData.respirations).map(key => (
+                  <label key={key} className="flex items-center capitalize">
+                    <input type="checkbox" checked={(formData.respirations as any)[key]} onChange={(e) => handleCheckboxChange('respirations', key, e.target.checked)} className="mr-2" />
+                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+            <div className="flex items-center">
+              <span className="font-semibold w-16">RR:</span>
+              <input type="text" value={formData.respiratoryRate} onChange={(e) => handleInputChange(e, 'respiratoryRate')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-1" />
+              <span className="font-semibold">br/min</span>
+            </div>
+            <div className="flex items-center">
+              <span className="font-semibold w-24">O2 Saturation:</span>
+              <input type="text" value={formData.o2Saturation} onChange={(e) => handleInputChange(e, 'o2Saturation')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              <span className="font-semibold ml-1">%</span>
+            </div>
+            <div className="col-span-2">
+              <span className={labelClass}>On auscultation:</span>
+              <div className="flex items-center space-x-4 mt-1">
+                <span className="font-semibold">Air Entry</span>
+                <label className="flex items-center"><input type="checkbox" checked={formData.onAuscultation.equal} onChange={(e) => handleCheckboxChange('onAuscultation', 'equal', e.target.checked)} className="mr-2" /> Equal</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.onAuscultation.unequal} onChange={(e) => handleCheckboxChange('onAuscultation', 'unequal', e.target.checked)} className="mr-2" /> Unequal</label>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center mt-2">
+            <span className="font-semibold w-16">Food:</span>
+            {renderRadioGroup('respiratoryFood', ['no', 'yes'], ['No', 'Yes'])}
+            {formData.respiratoryFood.yes && (
+              <div className="flex-grow flex items-center ml-4">
+                <span className="font-semibold mr-2">If Yes:</span>
+                <input type="text" value={formData.respiratoryFoodIfYes} onChange={(e) => handleInputChange(e, 'respiratoryFoodIfYes')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              </div>
+            )}
+          </div>
+          <div className="flex items-center mt-2">
+            <span className="font-semibold w-40">Abnormal Breath Sound:</span>
+            <input type="text" value={formData.abnormalBreathSound} onChange={(e) => handleInputChange(e, 'abnormalBreathSound')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+          </div>
+          <div className="flex items-center mt-2">
+            <span className="font-semibold w-16">Cough:</span>
+            <div className="flex-grow flex space-x-4">
+              {Object.keys(formData.cough).map(key => (
                 <label key={key} className="flex items-center capitalize">
-                  <input type="checkbox" checked={(formData.respirations as any)[key]} onChange={(e) => handleCheckboxChange('respirations', key, e.target.checked)} className="mr-2" />
+                  <input type="checkbox" checked={(formData.cough as any)[key]} onChange={(e) => handleCheckboxChange('cough', key, e.target.checked)} className="mr-2" />
+                  {key.replace(/([A-Z])/g, ' $1').trim()}
+                </label>
+              ))}
+            </div>
+            <span className="font-semibold w-24">Since When:</span>
+            <input type="text" value={formData.coughSinceWhen} onChange={(e) => handleInputChange(e, 'coughSinceWhen')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+          </div>
+          <div className="flex items-center mt-2">
+            <span className="font-semibold w-16">Secretions:</span>
+            <div className="flex-grow flex space-x-4">
+              {Object.keys(formData.secretions).map(key => (
+                <label key={key} className="flex items-center capitalize">
+                  <input type="checkbox" checked={(formData.secretions as any)[key]} onChange={(e) => handleCheckboxChange('secretions', key, e.target.checked)} className="mr-2" />
                   {key.replace(/([A-Z])/g, ' $1').trim()}
                 </label>
               ))}
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-          <div className="flex items-center">
-            <span className="font-semibold w-16">RR:</span>
-            <input type="text" value={formData.respiratoryRate} onChange={(e) => handleInputChange(e, 'respiratoryRate')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-1" />
-            <span className="font-semibold">br/min</span>
+
+        {/* Urinary System */}
+        <div className={sectionClass}>
+          <h3 className="font-semibold uppercase mb-2">Urinary System</h3>
+          <div className="flex items-center mt-2">
+            <span className="font-semibold w-24">If Voiding:</span>
+            {renderRadioGroup('urinaryVoiding', ['no', 'yes'], ['No', 'Yes'])}
+            {formData.urinaryVoiding.yes && (
+              <div className="flex-grow flex items-center ml-4 flex-wrap">
+                <label className="flex items-center"><input type="checkbox" checked={formData.urinaryIfVoiding.anuric} onChange={(e) => handleCheckboxChange('urinaryIfVoiding', 'anuric', e.target.checked)} className="mr-2" /> Anuric</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.urinaryIfVoiding.incontinent} onChange={(e) => handleCheckboxChange('urinaryIfVoiding', 'incontinent', e.target.checked)} className="mr-2" /> Incontinent</label>
+                <label className="flex items-center"><input type="checkbox" checked={formData.urinaryIfVoiding.catheter} onChange={(e) => handleCheckboxChange('urinaryIfVoiding', 'catheter', e.target.checked)} className="mr-2" /> Catheter</label>
+                <div className="flex items-center ml-2">
+                  <span className="font-semibold mr-1">AV Fistula Other:</span>
+                  <input type="text" value={formData.urinaryIfVoiding.avFistulaOther} onChange={(e) => setFormData({ ...formData, urinaryIfVoiding: { ...formData.urinaryIfVoiding, avFistulaOther: e.target.value } })} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-24">O2 Saturation:</span>
-            <input type="text" value={formData.o2Saturation} onChange={(e) => handleInputChange(e, 'o2Saturation')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-            <span className="font-semibold ml-1">%</span>
-          </div>
-          <div className="col-span-2">
-            <span className={labelClass}>On auscultation:</span>
-            <div className="flex items-center space-x-4 mt-1">
-              <span className="font-semibold">Air Entry</span>
-              <label className="flex items-center"><input type="checkbox" checked={formData.onAuscultation.equal} onChange={(e) => handleCheckboxChange('onAuscultation', 'equal', e.target.checked)} className="mr-2" /> Equal</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.onAuscultation.unequal} onChange={(e) => handleCheckboxChange('onAuscultation', 'unequal', e.target.checked)} className="mr-2" /> Unequal</label>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center mt-2">
-          <span className="font-semibold w-16">Food:</span>
-          {renderRadioGroup('respiratoryFood', ['no', 'yes'], ['No', 'Yes'])}
-          {formData.respiratoryFood.yes && (
-            <div className="flex-grow flex items-center ml-4">
-              <span className="font-semibold mr-2">If Yes:</span>
-              <input type="text" value={formData.respiratoryFoodIfYes} onChange={(e) => handleInputChange(e, 'respiratoryFoodIfYes')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-            </div>
-          )}
-        </div>
-        <div className="flex items-center mt-2">
-          <span className="font-semibold w-40">Abnormal Breath Sound:</span>
-          <input type="text" value={formData.abnormalBreathSound} onChange={(e) => handleInputChange(e, 'abnormalBreathSound')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-        </div>
-        <div className="flex items-center mt-2">
-          <span className="font-semibold w-16">Cough:</span>
-          <div className="flex-grow flex space-x-4">
-            {Object.keys(formData.cough).map(key => (
-              <label key={key} className="flex items-center capitalize">
-                <input type="checkbox" checked={(formData.cough as any)[key]} onChange={(e) => handleCheckboxChange('cough', key, e.target.checked)} className="mr-2" />
-                {key.replace(/([A-Z])/g, ' $1').trim()}
+          <div className="flex items-center mt-2 flex-wrap">
+            <span className="font-semibold w-16">Urine:</span>
+            {Object.keys(formData.urinarySection).filter(k => k !== 'urine').map(key => (
+              <label key={key} className="flex items-center mr-4 capitalize">
+                <input type="checkbox" checked={(formData.urinarySection as any)[key]} onChange={(e) => handleCheckboxChange('urinarySection', key, e.target.checked)} className="mr-2" />
+                {key}
               </label>
             ))}
           </div>
-          <span className="font-semibold w-24">Since When:</span>
-          <input type="text" value={formData.coughSinceWhen} onChange={(e) => handleInputChange(e, 'coughSinceWhen')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
         </div>
-        <div className="flex items-center mt-2">
-          <span className="font-semibold w-16">Secretions:</span>
-          <div className="flex-grow flex space-x-4">
-            {Object.keys(formData.secretions).map(key => (
-              <label key={key} className="flex items-center capitalize">
-                <input type="checkbox" checked={(formData.secretions as any)[key]} onChange={(e) => handleCheckboxChange('secretions', key, e.target.checked)} className="mr-2" />
-                {key.replace(/([A-Z])/g, ' $1').trim()}
-              </label>
-            ))}
-          </div>
-        </div>
-      </div>
 
-      {/* Urinary System */}
-      <div className={sectionClass}>
-        <h3 className="font-semibold uppercase mb-2">Urinary System</h3>
-        <div className="flex items-center mt-2">
-          <span className="font-semibold w-24">If Voiding:</span>
-          {renderRadioGroup('urinaryVoiding', ['no', 'yes'], ['No', 'Yes'])}
-          {formData.urinaryVoiding.yes && (
-            <div className="flex-grow flex items-center ml-4 flex-wrap">
-              <label className="flex items-center"><input type="checkbox" checked={formData.urinaryIfVoiding.anuric} onChange={(e) => handleCheckboxChange('urinaryIfVoiding', 'anuric', e.target.checked)} className="mr-2" /> Anuric</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.urinaryIfVoiding.incontinent} onChange={(e) => handleCheckboxChange('urinaryIfVoiding', 'incontinent', e.target.checked)} className="mr-2" /> Incontinent</label>
-              <label className="flex items-center"><input type="checkbox" checked={formData.urinaryIfVoiding.catheter} onChange={(e) => handleCheckboxChange('urinaryIfVoiding', 'catheter', e.target.checked)} className="mr-2" /> Catheter</label>
-              <div className="flex items-center ml-2">
-                <span className="font-semibold mr-1">AV Fistula Other:</span>
-                <input type="text" value={formData.urinaryIfVoiding.avFistulaOther} onChange={(e) => setFormData({...formData, urinaryIfVoiding: {...formData.urinaryIfVoiding, avFistulaOther: e.target.value}})} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+        {/* Gastrointestinal System */}
+        <div className={sectionClass}>
+          <h3 className="font-semibold uppercase mb-2">Gastrointestinal System</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <span className={labelClass}>Abdomen:</span>
+              <div className="flex items-center space-x-4 mt-1">
+                {Object.keys(formData.abdomen).map(key => (
+                  <label key={key} className="flex items-center capitalize">
+                    <input type="checkbox" checked={(formData.abdomen as any)[key]} onChange={(e) => handleCheckboxChange('abdomen', key, e.target.checked)} className="mr-2" />
+                    {key}
+                  </label>
+                ))}
               </div>
             </div>
-          )}
-        </div>
-        <div className="flex items-center mt-2 flex-wrap">
-          <span className="font-semibold w-16">Urine:</span>
-          {Object.keys(formData.urinarySection).filter(k => k !== 'urine').map(key => (
-            <label key={key} className="flex items-center mr-4 capitalize">
-              <input type="checkbox" checked={(formData.urinarySection as any)[key]} onChange={(e) => handleCheckboxChange('urinarySection', key, e.target.checked)} className="mr-2" />
-              {key}
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Gastrointestinal System */}
-      <div className={sectionClass}>
-        <h3 className="font-semibold uppercase mb-2">Gastrointestinal System</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <span className={labelClass}>Abdomen:</span>
-            <div className="flex items-center space-x-4 mt-1">
-              {Object.keys(formData.abdomen).map(key => (
-                <label key={key} className="flex items-center capitalize">
-                  <input type="checkbox" checked={(formData.abdomen as any)[key]} onChange={(e) => handleCheckboxChange('abdomen', key, e.target.checked)} className="mr-2" />
-                  {key}
-                </label>
-              ))}
+            <div>
+              <span className={labelClass}>Diet:</span>
+              <div className="flex items-center space-x-4 mt-1">
+                {Object.keys(formData.diet).map(key => (
+                  <label key={key} className="flex items-center capitalize">
+                    <input type="checkbox" checked={(formData.diet as any)[key]} onChange={(e) => handleCheckboxChange('diet', key, e.target.checked)} className="mr-2" />
+                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
-          <div>
-            <span className={labelClass}>Diet:</span>
-            <div className="flex items-center space-x-4 mt-1">
-              {Object.keys(formData.diet).map(key => (
-                <label key={key} className="flex items-center capitalize">
-                  <input type="checkbox" checked={(formData.diet as any)[key]} onChange={(e) => handleCheckboxChange('diet', key, e.target.checked)} className="mr-2" />
-                  {key.replace(/([A-Z])/g, ' $1').trim()}
-                </label>
-              ))}
+          <div className="flex items-center mt-4">
+            <span className="font-semibold w-24">Bowel Sounds:</span>
+            {renderRadioGroup('bowelSounds', ['present', 'absent'], ['Present', 'Absent'])}
+            <span className="font-semibold ml-4 mr-2">Last Bowel Movement (Date / Time):</span>
+            <input type="text" value={formData.lastBowelMovement} onChange={(e) => handleInputChange(e, 'lastBowelMovement')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+          </div>
+        </div>
+
+        {/* Musculoskeletal Assessment */}
+        <div className={sectionClass}>
+          <h3 className="font-semibold uppercase mb-2">Musculoskeletal Assessment</h3>
+          <div className="flex items-center mt-2">
+            <span className="font-semibold w-48">Range of Motion To All Extremities:</span>
+            {renderRadioGroup('rangeOfMotionToAllExtremities', ['yes', 'no'], ['Yes', 'No'])}
+            <span className="font-semibold ml-4 mr-2">Specify:</span>
+            <input type="text" value={formData.musculoSpecify} onChange={(e) => handleInputChange(e, 'musculoSpecify')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+          </div>
+          <div className="flex items-center mt-2">
+            <span className="font-semibold w-48">Present Swelling / Tenderness:</span>
+            {renderRadioGroup('presentSwellingTenderess', ['yes', 'no'], ['Yes', 'No'])}
+            <span className="font-semibold ml-4 mr-2">If Present:</span>
+            <input type="text" value={formData.musculoIfPresent} onChange={(e) => handleInputChange(e, 'musculoIfPresent')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+          </div>
+        </div>
+
+        {/* Integumentary System */}
+        <div className={sectionClass}>
+          <h3 className="font-semibold uppercase mb-2">Integumentary System</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <span className={labelClass}>Colour:</span>
+              {renderRadioGroup('integumentColour', ['cool', 'warm'], ['Cool', 'Warm'])}
+            </div>
+            <div>
+              <div className="flex items-center">
+                <span className="font-semibold w-16">Vitals:</span>
+                <input type="text" value={formData.integumentVitals} onChange={(e) => handleInputChange(e, 'integumentVitals')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              </div>
+              <div className="flex items-center mt-2">
+                <span className="font-semibold w-16">Heel:</span>
+                {renderRadioGroup('integumentCrurnHeel', ['intact', 'redness', 'peelSore'], ['Intact', 'Redness', 'Peel/Sore'])}
+              </div>
+              <div className="flex items-center mt-2">
+                <span className="font-semibold w-16">Crurn:</span>
+                {renderRadioGroup('integumentCrurn', ['intact', 'redness', 'peelSore'], ['Intact', 'Redness', 'Peel/Sore'])}
+              </div>
+            </div>
+            <div className="col-span-full">
+              <span className={labelClass}>L/R</span>
+              <div className="grid grid-cols-2 gap-4 mt-2">
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center">
+                    <span className="font-semibold w-16">Left Arm:</span>
+                    <input type="text" value={formData.leftArm} onChange={(e) => handleInputChange(e, 'leftArm')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
+                  </div>
+                  <div className="flex items-center">
+                    <span className="font-semibold w-16">Right Arm:</span>
+                    <input type="text" value={formData.rightArm} onChange={(e) => handleInputChange(e, 'rightArm')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
+                  </div>
+                </div>
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center">
+                    <span className="font-semibold w-16">Left Leg:</span>
+                    <input type="text" value={formData.leftLeg} onChange={(e) => handleInputChange(e, 'leftLeg')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
+                  </div>
+                  <div className="flex items-center">
+                    <span className="font-semibold w-16">Right Leg:</span>
+                    <input type="text" value={formData.rightLeg} onChange={(e) => handleInputChange(e, 'rightLeg')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="flex items-center mt-4">
-          <span className="font-semibold w-24">Bowel Sounds:</span>
-          {renderRadioGroup('bowelSounds', ['present', 'absent'], ['Present', 'Absent'])}
-          <span className="font-semibold ml-4 mr-2">Last Bowel Movement (Date / Time):</span>
-          <input type="text" value={formData.lastBowelMovement} onChange={(e) => handleInputChange(e, 'lastBowelMovement')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-        </div>
-      </div>
-      
-      {/* Musculoskeletal Assessment */}
-      <div className={sectionClass}>
-        <h3 className="font-semibold uppercase mb-2">Musculoskeletal Assessment</h3>
-        <div className="flex items-center mt-2">
-          <span className="font-semibold w-48">Range of Motion To All Extremities:</span>
-          {renderRadioGroup('rangeOfMotionToAllExtremities', ['yes', 'no'], ['Yes', 'No'])}
-          <span className="font-semibold ml-4 mr-2">Specify:</span>
-          <input type="text" value={formData.musculoSpecify} onChange={(e) => handleInputChange(e, 'musculoSpecify')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-        </div>
-        <div className="flex items-center mt-2">
-          <span className="font-semibold w-48">Present Swelling / Tenderness:</span>
-          {renderRadioGroup('presentSwellingTenderess', ['yes', 'no'], ['Yes', 'No'])}
-          <span className="font-semibold ml-4 mr-2">If Present:</span>
-          <input type="text" value={formData.musculoIfPresent} onChange={(e) => handleInputChange(e, 'musculoIfPresent')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-        </div>
-      </div>
-
-      {/* Integumentary System */}
-      <div className={sectionClass}>
-        <h3 className="font-semibold uppercase mb-2">Integumentary System</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <span className={labelClass}>Colour:</span>
-            {renderRadioGroup('integumentColour', ['cool', 'warm'], ['Cool', 'Warm'])}
+          <div className="flex items-center mt-4">
+            <span className="font-semibold w-24">Pressure Sore:</span>
+            <span className="font-semibold mr-2">Size:</span>
+            <input type="text" value={formData.pressureSoreSize} onChange={(e) => handleInputChange(e, 'pressureSoreSize')} className="w-1/3 p-1 border-b border-gray-300 focus:outline-none mr-4" />
+            <span className="font-semibold mr-2">Healing / Non Healing:</span>
+            {renderRadioGroup('pressureSoreHealing', ['healing', 'nonHealing'], ['Healing', 'Non Healing'])}
           </div>
-          <div>
+          <div className="mt-4">
+            <span className="font-semibold">Moist Braden Risk Assessment Score (ICUs Only)</span>
+            <input type="text" value={formData.bradenScore} onChange={(e) => handleInputChange(e, 'bradenScore')} className="w-full p-1 border-b border-gray-300 focus:outline-none" />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-4 border border-gray-300 rounded-md p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="flex items-center">
-              <span className="font-semibold w-16">Vitals:</span>
-              <input type="text" value={formData.integumentVitals} onChange={(e) => handleInputChange(e, 'integumentVitals')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+              <span className="font-semibold w-16">At:</span>
+              <input type="text" value={formData.footerAt} onChange={(e) => handleInputChange(e, 'footerAt')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
             </div>
-            <div className="flex items-center mt-2">
-              <span className="font-semibold w-16">Heel:</span>
-              {renderRadioGroup('integumentCrurnHeel', ['intact', 'redness', 'peelSore'], ['Intact', 'Redness', 'Peel/Sore'])}
+            <div className="flex items-center">
+              <span className="font-semibold w-16">Time:</span>
+              <input type="time" value={formData.footerTime} onChange={(e) => handleInputChange(e, 'footerTime')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
             </div>
-            <div className="flex items-center mt-2">
-              <span className="font-semibold w-16">Crurn:</span>
-              {renderRadioGroup('integumentCrurn', ['intact', 'redness', 'peelSore'], ['Intact', 'Redness', 'Peel/Sore'])}
+            <div className="flex items-center">
+              <span className="font-semibold w-24">Name of RN:</span>
+              <input type="text" value={formData.footerRnName} onChange={(e) => handleInputChange(e, 'footerRnName')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
+            </div>
+            <div className="flex items-center">
+              <span className="font-semibold w-24">Signature:</span>
+              <div className="flex-grow flex items-center justify-center p-1 border-b border-gray-300 h-12">
+                {isVerifyingSignature ? (
+                  <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
+                ) : formData.footerRnSign.startsWith('http') ? (
+                  <img
+                    src={formData.footerRnSign}
+                    alt="Signature"
+                    title="Click to remove signature"
+                    className="h-10 object-contain cursor-pointer hover:opacity-75"
+                    onClick={handleSignatureReset}
+                  />
+                ) : (
+                  <input
+                    type="password"
+                    value={formData.footerRnSign}
+                    onChange={(e) => handleInputChange(e, 'footerRnSign')}
+                    className="w-full text-center focus:outline-none bg-transparent"
+                    maxLength={10}
+                    placeholder="Enter 10-digit PIN"
+                    autoComplete="new-password"
+                  />
+                )}
+              </div>
             </div>
           </div>
-          <div className="col-span-full">
-            <span className={labelClass}>L/R</span>
-            <div className="grid grid-cols-2 gap-4 mt-2">
-              <div className="flex flex-col space-y-2">
-                <div className="flex items-center">
-                  <span className="font-semibold w-16">Left Arm:</span>
-                  <input type="text" value={formData.leftArm} onChange={(e) => handleInputChange(e, 'leftArm')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
-                </div>
-                <div className="flex items-center">
-                  <span className="font-semibold w-16">Right Arm:</span>
-                  <input type="text" value={formData.rightArm} onChange={(e) => handleInputChange(e, 'rightArm')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
-                </div>
-              </div>
-              <div className="flex flex-col space-y-2">
-                <div className="flex items-center">
-                  <span className="font-semibold w-16">Left Leg:</span>
-                  <input type="text" value={formData.leftLeg} onChange={(e) => handleInputChange(e, 'leftLeg')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
-                </div>
-                <div className="flex items-center">
-                  <span className="font-semibold w-16">Right Leg:</span>
-                  <input type="text" value={formData.rightLeg} onChange={(e) => handleInputChange(e, 'rightLeg')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none mr-4" />
-                </div>
-              </div>
-            </div>
+          <div className="flex items-center space-x-4 mt-4">
+            <label className="flex items-center"><input type="checkbox" checked={formData.footerOC} onChange={(e) => handleInputChange(e, 'footerOC')} className="mr-2" /> OC: Level of Consciousness</label>
+            <label className="flex items-center"><input type="checkbox" checked={formData.footerGCS} onChange={(e) => handleInputChange(e, 'footerGCS')} className="mr-2" /> GCS: Glasgowcoma Scale</label>
+            <label className="flex items-center"><input type="checkbox" checked={formData.footerDVT} onChange={(e) => handleInputChange(e, 'footerDVT')} className="mr-2" /> DVT: Deep Vein Thrombosis</label>
           </div>
-        </div>
-        <div className="flex items-center mt-4">
-          <span className="font-semibold w-24">Pressure Sore:</span>
-          <span className="font-semibold mr-2">Size:</span>
-          <input type="text" value={formData.pressureSoreSize} onChange={(e) => handleInputChange(e, 'pressureSoreSize')} className="w-1/3 p-1 border-b border-gray-300 focus:outline-none mr-4" />
-          <span className="font-semibold mr-2">Healing / Non Healing:</span>
-          {renderRadioGroup('pressureSoreHealing', ['healing', 'nonHealing'], ['Healing', 'Non Healing'])}
-        </div>
-        <div className="mt-4">
-          <span className="font-semibold">Moist Braden Risk Assessment Score (ICUs Only)</span>
-          <input type="text" value={formData.bradenScore} onChange={(e) => handleInputChange(e, 'bradenScore')} className="w-full p-1 border-b border-gray-300 focus:outline-none" />
         </div>
       </div>
-      
-      {/* Footer */}
-      <div className="mt-4 border border-gray-300 rounded-md p-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="flex items-center">
-            <span className="font-semibold w-16">At:</span>
-            <input type="text" value={formData.footerAt} onChange={(e) => handleInputChange(e, 'footerAt')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-16">Time:</span>
-            <input type="time" value={formData.footerTime} onChange={(e) => handleInputChange(e, 'footerTime')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-24">Name of RN:</span>
-            <input type="text" value={formData.footerRnName} onChange={(e) => handleInputChange(e, 'footerRnName')} className="flex-grow p-1 border-b border-gray-300 focus:outline-none" />
-          </div>
-          <div className="flex items-center">
-            <span className="font-semibold w-24">Signature:</span>
-            <div className="flex-grow flex items-center justify-center p-1 border-b border-gray-300 h-12">
-                 {isVerifyingSignature ? (
-                    <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
-                 ) : formData.footerRnSign.startsWith('http') ? (
-                    <img 
-                        src={formData.footerRnSign} 
-                        alt="Signature"
-                        title="Click to remove signature"
-                        className="h-10 object-contain cursor-pointer hover:opacity-75"
-                        onClick={handleSignatureReset}
-                    />
-                 ) : (
-                    <input
-                        type="password"
-                        value={formData.footerRnSign}
-                        onChange={(e) => handleInputChange(e, 'footerRnSign')}
-                        className="w-full text-center focus:outline-none bg-transparent"
-                        maxLength={10}
-                        placeholder="Enter 10-digit PIN"
-                        autoComplete="new-password"
-                    />
-                 )}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center space-x-4 mt-4">
-          <label className="flex items-center"><input type="checkbox" checked={formData.footerOC} onChange={(e) => handleInputChange(e, 'footerOC')} className="mr-2" /> OC: Level of Consciousness</label>
-          <label className="flex items-center"><input type="checkbox" checked={formData.footerGCS} onChange={(e) => handleInputChange(e, 'footerGCS')} className="mr-2" /> GCS: Glasgowcoma Scale</label>
-          <label className="flex items-center"><input type="checkbox" checked={formData.footerDVT} onChange={(e) => handleInputChange(e, 'footerDVT')} className="mr-2" /> DVT: Deep Vein Thrombosis</label>
-        </div>
-      </div>
-      
-      {/* Save Button */}
-      <div className="flex justify-end mt-6">
+
+      {/* Action Buttons */}
+      <div className="flex justify-end gap-4 mt-6 print:hidden">
         <button
           onClick={handleSave}
           disabled={isSaving}
           className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
         >
-          {isSaving ? ( <> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </> ) : ( "Save Assessment Form" )}
+          {isSaving ? (
+            <>
+              <RefreshCw className="h-4 w-4 animate-spin" /> Saving...
+            </>
+          ) : (
+            "Save Assessment Form"
+          )}
         </button>
+        <PdfGenerator contentRef={contentRef as React.RefObject<HTMLDivElement>} fileName="Patient-Admission-Assessment" />
       </div>
     </div>
   );

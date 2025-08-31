@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { RefreshCw, PlusCircle, MinusCircle } from 'lucide-react';
+import PatientDetailsHeader from "./PatientDetailsHeader";
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 // --- Type Definitions ---
 interface IVInfusionRow {
@@ -21,10 +23,25 @@ interface IVInfusionRow {
   checked: string;    // Will hold PIN or signature URL
 }
 
+// New interface for the footer data
+interface IVInfusionFooterData {
+  lineCare: string;
+  nonDrugOrders: string;
+  investigation: string;
+  reference: string;
+}
+
+// Update the main data interface to include the footer data
+interface IVInfusionData {
+  stat_rows: IVInfusionRow[];
+  order_rows: IVInfusionRow[];
+  footer?: IVInfusionFooterData;
+}
+
 type SignatureField = 'drSign' | 'given' | 'checked';
 
 // --- Helper Function to Create Initial State ---
-const createInitialData = (count: number = 10): IVInfusionRow[] => {
+const createInitialData = (count: number = 4): IVInfusionRow[] => {
   return Array.from({ length: count }, (_, i) => ({
     srNo: i + 1,
     time: '',
@@ -41,13 +58,22 @@ const createInitialData = (count: number = 10): IVInfusionRow[] => {
   }));
 };
 
+const initialFooterData: IVInfusionFooterData = {
+  lineCare: '',
+  nonDrugOrders: '',
+  investigation: '',
+  reference: '',
+};
+
 // --- Main IV Infusion Sheet Component ---
 const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
-  const [statRows, setStatRows] = useState<IVInfusionRow[]>(createInitialData(11));
-  const [orderRows, setOrderRows] = useState<IVInfusionRow[]>(createInitialData(15));
+  const [statRows, setStatRows] = useState<IVInfusionRow[]>(createInitialData());
+  const [orderRows, setOrderRows] = useState<IVInfusionRow[]>(createInitialData());
+  const [footerData, setFooterData] = useState<IVInfusionFooterData>(initialFooterData);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [verifyingSignature, setVerifyingSignature] = useState<{ table: 'stat' | 'order', index: number, field: SignatureField } | null>(null);
+  const formRef = useRef<HTMLDivElement>(null); // Create the ref
 
   // --- Data Fetching Function ---
   const fetchInfusionData = useCallback(async () => {
@@ -62,9 +88,10 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
       if (error && error.code !== 'PGRST116') throw error;
 
       if (data?.iv_infusion_data) {
-        const { stat_rows, order_rows } = data.iv_infusion_data as { stat_rows: IVInfusionRow[], order_rows: IVInfusionRow[] };
-        if (stat_rows && stat_rows.length > 0) setStatRows(stat_rows);
-        if (order_rows && order_rows.length > 0) setOrderRows(order_rows);
+        const parsedData = data.iv_infusion_data as IVInfusionData;
+        if (parsedData.stat_rows) setStatRows(parsedData.stat_rows);
+        if (parsedData.order_rows) setOrderRows(parsedData.order_rows);
+        if (parsedData.footer) setFooterData(parsedData.footer);
         toast.success("Previous IV Infusion data loaded.");
       }
     } catch (error) {
@@ -81,43 +108,43 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
 
   // --- Signature Verification ---
   const checkAndSetSignature = useCallback(async (password: string, index: number, field: SignatureField, table: 'stat' | 'order') => {
-      if (password.length !== 10) return;
-      setVerifyingSignature({ table, index, field });
-      try {
-          const { data, error } = await supabase.from('signature').select('signature_url').eq('password', password).single();
-          if (error && error.code !== 'PGRST116') throw error;
+    if (password.length !== 10) return;
+    setVerifyingSignature({ table, index, field });
+    try {
+      const { data, error } = await supabase.from('signature').select('signature_url').eq('password', password).single();
+      if (error && error.code !== 'PGRST116') throw error;
 
-          if (data?.signature_url) {
-              const setRows = table === 'stat' ? setStatRows : setOrderRows;
-              setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: data.signature_url } : row));
-              toast.success(`Signature verified for row ${index + 1}.`);
-          } else {
-              toast.error(`Invalid PIN for row ${index + 1}.`);
-          }
-      } catch (error) {
-          console.error("Error verifying signature:", error);
-          toast.error("Could not verify signature.");
-      } finally {
-          setVerifyingSignature(null);
+      if (data?.signature_url) {
+        const setRows = table === 'stat' ? setStatRows : setOrderRows;
+        setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: data.signature_url } : row));
+        toast.success(`Signature verified for row ${index + 1}.`);
+      } else {
+        toast.error(`Invalid PIN for row ${index + 1}.`);
       }
+    } catch (error) {
+      console.error("Error verifying signature:", error);
+      toast.error("Could not verify signature.");
+    } finally {
+      setVerifyingSignature(null);
+    }
   }, []);
 
   // --- Data Saving Function ---
   const handleSave = async () => {
     setIsSaving(true);
     const signatureFields: SignatureField[] = ['drSign', 'given', 'checked'];
-    
+
     // Function to clean unsaved PINs from rows
     const cleanRows = (rows: IVInfusionRow[]) => {
-        return rows.map(row => {
-            const newRow = { ...row };
-            signatureFields.forEach(field => {
-                if (newRow[field] && newRow[field].length === 10 && !newRow[field].startsWith('http')) {
-                    newRow[field] = '';
-                }
-            });
-            return newRow;
+      return rows.map(row => {
+        const newRow = { ...row };
+        signatureFields.forEach(field => {
+          if (newRow[field] && newRow[field].length === 10 && !newRow[field].startsWith('http')) {
+            newRow[field] = '';
+          }
         });
+        return newRow;
+      });
     };
 
     try {
@@ -128,10 +155,16 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
         return;
       }
 
+      const dataToSave: IVInfusionData = {
+        stat_rows: cleanRows(statRows),
+        order_rows: cleanRows(orderRows),
+        footer: footerData,
+      };
+
       const { error } = await supabase.from('ipd_record').upsert({
         ipd_id: ipdId,
         user_id: session.user.id,
-        iv_infusion_data: { stat_rows: cleanRows(statRows), order_rows: cleanRows(orderRows) },
+        iv_infusion_data: dataToSave,
       }, { onConflict: 'ipd_id,user_id' });
 
       if (error) throw error;
@@ -158,16 +191,21 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
     setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: value } : row));
 
     if (signatureFields.includes(field as SignatureField) && value.length === 10) {
-        checkAndSetSignature(value, index, field as SignatureField, table);
+      checkAndSetSignature(value, index, field as SignatureField, table);
     }
   };
-  
+
   const handleSignatureReset = (index: number, field: SignatureField, table: 'stat' | 'order') => {
-      if (window.confirm("Are you sure you want to remove this signature?")) {
-          const setRows = table === 'stat' ? setStatRows : setOrderRows;
-          setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: '' } : row));
-          toast.info(`Signature for row ${index + 1} has been cleared.`);
-      }
+    if (window.confirm("Are you sure you want to remove this signature?")) {
+      const setRows = table === 'stat' ? setStatRows : setOrderRows;
+      setRows(prevRows => prevRows.map((row, i) => i === index ? { ...row, [field]: '' } : row));
+      toast.info(`Signature for row ${index + 1} has been cleared.`);
+    }
+  };
+
+  const handleFooterChange = (e: React.ChangeEvent<HTMLInputElement>, field: keyof IVInfusionFooterData) => {
+    const { value } = e.target;
+    setFooterData(prev => ({ ...prev, [field]: value }));
   };
 
   // --- Row Management Functions ---
@@ -202,32 +240,39 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
       </div>
     );
   }
-  
+
   const gridColumnsClass = "grid-cols-[40px_70px_1fr_60px_1fr_60px_1fr_80px_60px_60px_60px_60px]";
 
-  const renderSignatureCell = (row: IVInfusionRow, index: number, field: SignatureField, tableType: 'stat' | 'order') => (
-    <div className="flex items-center justify-center h-full">
-      {verifyingSignature?.table === tableType && verifyingSignature?.index === index && verifyingSignature?.field === field ? (
-        <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
-      ) : row[field].startsWith('http') ? (
-        <img 
-          src={row[field]} 
-          alt="Signature"
-          title="Click to remove signature"
-          className="h-6 object-contain cursor-pointer"
-          onClick={() => handleSignatureReset(index, field, tableType)}
-        />
-      ) : (
-        <input 
-          type="password"
-          value={row[field]}
-          onChange={(e) => handleInputChange(e, index, field, tableType)}
-          className="p-1 focus:outline-none w-full h-full text-center bg-transparent"
-          maxLength={10}
-        />
-      )}
-    </div>
-  );
+  const renderSignatureCell = (row: IVInfusionRow, index: number, field: SignatureField, tableType: 'stat' | 'order') => {
+    const signatureKey = `${tableType}-${index}-${field}`;
+    const isVerifying = verifyingSignature?.table === tableType && verifyingSignature?.index === index && verifyingSignature?.field === field;
+    const signatureUrl = row[field];
+
+    return (
+      <div className="flex items-center justify-center h-full">
+        {isVerifying ? (
+          <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
+        ) : signatureUrl.startsWith('http') ? (
+          <img
+            src={signatureUrl}
+            alt="Signature"
+            title="Click to remove signature"
+            className="h-6 object-contain cursor-pointer"
+            onClick={() => handleSignatureReset(index, field, tableType)}
+          />
+        ) : (
+          <input
+            type="password"
+            value={signatureUrl}
+            onChange={(e) => handleInputChange(e, index, field, tableType)}
+            className="p-1 focus:outline-none w-full h-full text-center bg-transparent"
+            maxLength={10}
+            placeholder="Enter PIN"
+          />
+        )}
+      </div>
+    );
+  };
 
   const renderTable = (rows: IVInfusionRow[], tableType: 'stat' | 'order') => (
     <div className="border border-gray-400 rounded-md overflow-hidden mb-8">
@@ -276,13 +321,15 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
   );
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-xl max-w-full mx-auto font-sans text-xs">
+    <div ref={formRef} className="bg-white p-6 rounded-lg shadow-xl max-w-full mx-auto font-sans text-xs">
       <div className="text-center mb-6">
         <h1 className="font-bold text-2xl uppercase">IV Infusion Therapy Sheet</h1>
         <p className="text-sm text-gray-500">
           <span className="font-semibold">Medford Multi Speciality Hospital</span>
         </p>
       </div>
+
+      <PatientDetailsHeader ipdId={ipdId} />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-2">
@@ -293,36 +340,69 @@ const IVInfusionSheet = ({ ipdId }: { ipdId: string }) => {
           <h3 className="font-bold text-center mb-4 text-sm">GUIDELINES FOR MONITORING POST ADMINISTRATION SIDE EFFECTS</h3>
           <ul className="space-y-4">
             <li>
-              <span className="font-semibold">CONCENTRATED POTASSIUM CHLORIDE INFUSIONS</span><br/>
+              <span className="font-semibold">CONCENTRATED POTASSIUM CHLORIDE INFUSIONS</span><br />
               <span className="text-gray-600">SIDE EFFECTS: PARASTHESIA OF EXTREMITIES, AREFLEXIA, ECG CHANGES (TALL T WAVES), FLACCID PARALYSIS, RESPIRATORY PARALYSIS, DIFFICULTY IN CARDIAC ARRHYTHMIAS, CARDIAC ARREST</span>
             </li>
             <li>
-              <span className="font-semibold">NARCOTICS</span><br/>
+              <span className="font-semibold">NARCOTICS</span><br />
               <span className="text-gray-600">SIDE EFFECTS: MARKED SEDATION, DROWSINESS, VERTIGO, VOMITING, RESPIRATORY DEPRESSION, APNEA, ALTERED SENSORIUM</span>
             </li>
-            <li><span className="font-semibold">ANTIBIOTICS</span><br/><span className="text-gray-600">EPIGASTRIC DISCOMFORT, DIARRHEA, JAUNDICE, CHOLESTASIS, PSEUDOMEMBRANOUS COLITIS</span></li>
-            <li><span className="font-semibold">OXYGEN</span><br/><span className="text-gray-600">SORE THROAT, COUGHING, VOMITING</span></li>
-            <li><span className="font-semibold">FLOMISTINE</span><br/><span className="text-gray-600">RUNNY STUFFY NOSE, SORE THROAT, VOMITING, NOSE BLEED</span></li>
+            <li><span className="font-semibold">ANTIBIOTICS</span><br /><span className="text-gray-600">EPIGASTRIC DISCOMFORT, DIARRHEA, JAUNDICE, CHOLESTASIS, PSEUDOMEMBRANOUS COLITIS</span></li>
+            <li><span className="font-semibold">OXYGEN</span><br /><span className="text-gray-600">SORE THROAT, COUGHING, VOMITING</span></li>
+            <li><span className="font-semibold">FLOMISTINE</span><br /><span className="text-gray-600">RUNNY STUFFY NOSE, SORE THROAT, VOMITING, NOSE BLEED</span></li>
           </ul>
         </div>
       </div>
 
-      <div className="flex justify-end items-center mt-6">
+      <div className="flex justify-end items-center mt-6 space-x-4">
+        <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="IVInfusionSheet" />
         <button
           onClick={handleSave}
           disabled={isSaving}
           className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
         >
-          {isSaving ? ( <> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </> ) : ( "Save All Infusion Data" )}
+          {isSaving ? (<> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </>) : ("Save All Infusion Data")}
         </button>
       </div>
-      
-      {/* Footer Section */}
+
+      {/* Footer Section with editable fields */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-8 text-sm">
-        <div className="border-t border-gray-400 pt-2 text-center">Line Care / ET Care:</div>
-        <div className="border-t border-gray-400 pt-2 text-center">Non Drug Orders:</div>
-        <div className="border-t border-gray-400 pt-2 text-center">Investigation:</div>
-        <div className="border-t border-gray-400 pt-2 text-center">Reference:</div>
+        <div className="flex flex-col items-center">
+          <label className="font-semibold">Line Care / ET Care:</label>
+          <input
+            type="text"
+            value={footerData.lineCare}
+            onChange={(e) => handleFooterChange(e, 'lineCare')}
+            className="w-full p-2 mt-2 border-t border-gray-400 focus:outline-none text-center bg-transparent"
+          />
+        </div>
+        <div className="flex flex-col items-center">
+          <label className="font-semibold">Non Drug Orders:</label>
+          <input
+            type="text"
+            value={footerData.nonDrugOrders}
+            onChange={(e) => handleFooterChange(e, 'nonDrugOrders')}
+            className="w-full p-2 mt-2 border-t border-gray-400 focus:outline-none text-center bg-transparent"
+          />
+        </div>
+        <div className="flex flex-col items-center">
+          <label className="font-semibold">Investigation:</label>
+          <input
+            type="text"
+            value={footerData.investigation}
+            onChange={(e) => handleFooterChange(e, 'investigation')}
+            className="w-full p-2 mt-2 border-t border-gray-400 focus:outline-none text-center bg-transparent"
+          />
+        </div>
+        <div className="flex flex-col items-center">
+          <label className="font-semibold">Reference:</label>
+          <input
+            type="text"
+            value={footerData.reference}
+            onChange={(e) => handleFooterChange(e, 'reference')}
+            className="w-full p-2 mt-2 border-t border-gray-400 focus:outline-none text-center bg-transparent"
+          />
+        </div>
       </div>
     </div>
   );

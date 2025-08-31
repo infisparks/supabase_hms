@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
+import PatientDetailsHeader from "./PatientDetailsHeader"; // Import the new component
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 // --- Type Definitions ---
 interface BloodTransfusionConsentData {
@@ -111,20 +113,21 @@ const BloodTransfusionConsentForm = ({ ipdId }: { ipdId: string }) => {
     signatureOfTreatingDoctor: false,
     signatureOfSurgeon: false,
   });
+  const formRef = useRef<HTMLDivElement>(null);
 
   const fetchConsentData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: consentData, error: consentError } = await supabase
         .from("ipd_record")
         .select("blood_transfusion_consent_data")
         .eq("ipd_id", ipdId)
         .single();
 
-      if (error && error.code !== "PGRST116") throw error;
+      if (consentError && consentError.code !== "PGRST116") throw consentError;
 
-      if (data?.blood_transfusion_consent_data) {
-        setFormData(data.blood_transfusion_consent_data as BloodTransfusionConsentData);
+      if (consentData?.blood_transfusion_consent_data) {
+        setFormData(consentData.blood_transfusion_consent_data as BloodTransfusionConsentData);
         toast.success("Consent form data loaded.");
       }
     } catch (error) {
@@ -148,9 +151,9 @@ const BloodTransfusionConsentForm = ({ ipdId }: { ipdId: string }) => {
         setIsSaving(false);
         return;
       }
-      
+
       const dataToSave = { ...formData };
-      
+
       // Clear unsaved PINs before saving
       (Object.keys(dataToSave) as Array<keyof typeof dataToSave>).forEach(key => {
         const value = dataToSave[key as keyof BloodTransfusionConsentData];
@@ -163,7 +166,7 @@ const BloodTransfusionConsentForm = ({ ipdId }: { ipdId: string }) => {
           (dataToSave as any)[key] = '';
         }
       });
-      
+
       const { error } = await supabase.from("ipd_record").upsert(
         {
           ipd_id: ipdId,
@@ -211,7 +214,7 @@ const BloodTransfusionConsentForm = ({ ipdId }: { ipdId: string }) => {
         .select('signature_url')
         .eq('password', password)
         .single();
-      
+
       if (error && error.code !== 'PGRST116') throw error;
 
       if (data?.signature_url) {
@@ -228,10 +231,10 @@ const BloodTransfusionConsentForm = ({ ipdId }: { ipdId: string }) => {
       setIsVerifyingSignature(prev => ({ ...prev, [signatureKey]: false }));
     }
   }, []);
-  
+
   const handleSignatureReset = (field: keyof BloodTransfusionConsentData) => {
     if (window.confirm("Are you sure you want to remove this signature?")) {
-      setFormData(prev => ({...prev, [field]: ''}));
+      setFormData(prev => ({ ...prev, [field]: '' }));
       toast.info("Signature has been cleared.");
     }
   };
@@ -239,7 +242,7 @@ const BloodTransfusionConsentForm = ({ ipdId }: { ipdId: string }) => {
   const renderSignatureInput = (field: keyof BloodTransfusionConsentData) => {
     const signatureKey = field as keyof typeof isVerifyingSignature;
     const isVerifying = isVerifyingSignature[signatureKey];
-    
+
     return (
       <div className="flex-grow p-1 border-b border-gray-300 focus:outline-none h-12 flex items-center justify-center">
         {isVerifying ? (
@@ -285,46 +288,13 @@ const BloodTransfusionConsentForm = ({ ipdId }: { ipdId: string }) => {
   }
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-xl max-w-4xl mx-auto font-sans text-xs">
+    <div ref={formRef} className="bg-white p-6 rounded-lg shadow-xl max-w-4xl mx-auto font-sans text-xs">
       <div className="text-center mb-6">
         <h2 className="font-bold text-lg">CONSENT FORM - Transfusion of Blood or Blood Components</h2>
       </div>
 
-      {/* Patient Details Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2 mb-6">
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Name of Patient:</label>
-          <input type="text" value={formData.patientNameHeader} onChange={(e) => handleInputChange(e, "patientNameHeader")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Age/Sex:</label>
-          <input type="text" value={formData.ageSexHeader} onChange={(e) => handleInputChange(e, "ageSexHeader")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Room/Ward No:</label>
-          <input type="text" value={formData.roomWardNo} onChange={(e) => handleInputChange(e, "roomWardNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>UHID No:</label>
-          <input type="text" value={formData.uhidNo} onChange={(e) => handleInputChange(e, "uhidNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>IPD No:</label>
-          <input type="text" value={formData.ipdNo} onChange={(e) => handleInputChange(e, "ipdNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Contact No.:</label>
-          <input type="text" value={formData.contactNo} onChange={(e) => handleInputChange(e, "contactNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Under Care of Doctor:</label>
-          <input type="text" value={formData.underCareOfDoctor} onChange={(e) => handleInputChange(e, "underCareOfDoctor")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Admission Date:</label>
-          <input type="text" value={formData.admissionDate} onChange={(e) => handleInputChange(e, "admissionDate")} className={inputClass} />
-        </div>
-      </div>
+      {/* Patient Details Section - Now using the new component */}
+      <PatientDetailsHeader ipdId={ipdId} />
 
       <div className="mt-4">
         <p className="mb-2">
@@ -369,7 +339,7 @@ const BloodTransfusionConsentForm = ({ ipdId }: { ipdId: string }) => {
           I hereby refuse to blood/ blood components transfusion.
         </label>
       </div>
-      
+
       <div className="py-2">
         <p className="mt-2 text-gray-500 italic text-sm">Consent/Refusal is signed by a person other than the patient as the patient is incapable of giving legal consent due to:</p>
         <input
@@ -505,15 +475,16 @@ const BloodTransfusionConsentForm = ({ ipdId }: { ipdId: string }) => {
         </div>
       </div>
 
-      <div className="flex justify-end mt-6">
+      <div className="flex justify-end mt-6 no-pdf">
+        <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="BloodTransfusionConsentForm" />
         <button
           onClick={handleSave}
           disabled={isSaving}
-          className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? "bg-gray-400" : "bg-green-500 hover:bg-green-600"}`}
+          className={`flex items-center gap-2 px-6 py-3  rounded-lg text-white font-semibold ${isSaving ? "bg-gray-400" : "bg-green-500 hover:bg-green-600"}`}
         >
           {isSaving ? (
             <>
-              <RefreshCw className="h-4 w-4 animate-spin" /> Saving...
+              <RefreshCw className="h-4 w-4 animate-spin " /> Saving...
             </>
           ) : (
             "Save Consent Form"

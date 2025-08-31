@@ -1,10 +1,11 @@
-// Filename: indoor-patient-progress-notes.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { RefreshCw, PlusCircle, MinusCircle } from 'lucide-react';
+import PatientDetailsHeader from "./PatientDetailsHeader";
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 // --- Type Definitions ---
 interface ProgressNoteRow {
@@ -13,7 +14,7 @@ interface ProgressNoteRow {
 }
 
 // --- Helper Function to Create Initial State ---
-const createInitialRows = (count: number = 15): ProgressNoteRow[] => {
+const createInitialRows = (count: number = 4): ProgressNoteRow[] => {
   return Array.from({ length: count }, () => ({
     date: '',
     progressNote: '',
@@ -25,11 +26,19 @@ const IndoorPatientProgressNotes = ({ ipdId }: { ipdId: string }) => {
   const [rows, setRows] = useState<ProgressNoteRow[]>(createInitialRows());
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null); // Create the ref
 
   // --- Data Fetching Function ---
   const fetchProgressNotes = useCallback(async () => {
     setIsLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error("User not authenticated.");
+        setIsLoading(false);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('ipd_record')
         .select('progress_notes')
@@ -114,10 +123,12 @@ const IndoorPatientProgressNotes = ({ ipdId }: { ipdId: string }) => {
   }
 
   return (
-    <div className="bg-white p-8 rounded-lg shadow-xl max-w-7xl mx-auto font-sans">
+    <div ref={formRef} className="bg-white p-8 rounded-lg shadow-xl max-w-7xl mx-auto font-sans">
       <div className="text-center mb-6">
         <h1 className="font-bold text-2xl uppercase">Indoor Patients Progress Notes</h1>
       </div>
+
+      <PatientDetailsHeader ipdId={ipdId} />
 
       <div className="border border-gray-400 rounded-md overflow-hidden">
         {/* Table Header */}
@@ -157,13 +168,16 @@ const IndoorPatientProgressNotes = ({ ipdId }: { ipdId: string }) => {
                 <MinusCircle className="h-4 w-4" /> Remove Row
             </button>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
-        >
-          {isSaving ? ( <> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </> ) : ( "Save Progress Notes" )}
-        </button>
+        <div className="flex space-x-4">
+            <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="IndoorPatientProgressNotes" />
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold ${isSaving ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
+            >
+              {isSaving ? ( <> <RefreshCw className="h-4 w-4 animate-spin" /> Saving... </> ) : ( "Save Progress Notes" )}
+            </button>
+        </div>
       </div>
     </div>
   );

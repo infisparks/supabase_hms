@@ -1,8 +1,11 @@
 "use client";
-import { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, PlusCircle, MinusCircle } from 'lucide-react';
+import PatientDetailsHeader from "./PatientDetailsHeader";
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 interface InvestigationFormData {
   investigations: string[];
@@ -45,6 +48,7 @@ const InvestigationSheetPage = ({ ipdId }: { ipdId: string }) => {
   const [formData, setFormData] = useState<InvestigationFormData>(defaultFormData);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const formRef = useRef<HTMLDivElement>(null); // Create the ref
 
   const investigationItems = [
     'HB', 'WBC', 'PLATELET', 'CRP', 'ESR', 'PT', 'PTT', 'INR', 'S.CREATININE', 'FIBRINOGEN', 'FDP', 'BILIRUBIN', 'SGOT', 'SGPT', 'ALK.PHOSPHATE', 'TOTAL PROTEIN', 'ALBUMIN', 'GLOBULIN', 'SODIUM', 'POTASSIUM', 'CHLORIDE', 'BUN', 'BS', 'PPBS', 'CALCIUM', 'PHOSPHORUS', 'URIC ACID', 'LACTATE', 'MAGNESIUM', 'CKMB', 'CPK', 'LDH', 'CHOLESTEROL', 'TRIGLYCERIDE', 'LDL', 'TROP T / TROP I', 'BNNP', 'HIV', 'HBsAg', 'HCV', 'HU', 'PH', 'PC02', 'PA02', 'Hco3', 'SAT', 'MODE', 'TV', 'RR', 'FI02', 'PEEP / EPAP', 'IPAD'
@@ -86,7 +90,6 @@ const InvestigationSheetPage = ({ ipdId }: { ipdId: string }) => {
     }
   };
 
-  // ... (rest of the functions like handleSave, handleDynamicInputChange, etc., remain unchanged)
   const handleSave = async () => {
     setIsSaving(true);
     try {
@@ -192,30 +195,17 @@ const InvestigationSheetPage = ({ ipdId }: { ipdId: string }) => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8 font-inter">
-      {/* ... (rest of the component JSX, which is now safe to render) */}
+    <div ref={formRef} className="min-h-screen bg-gray-100 p-8 font-inter">
       <div className="bg-white p-8 rounded-lg shadow-xl max-w-5xl mx-auto">
-        <div className="flex justify-between items-center border-b-2 border-gray-400 pb-4 mb-4">
-          <div className="flex items-center">
-            <div className="flex flex-col text-sm items-center">
-              <span className="font-bold text-lg">MEDFORD</span>
-              <span className="text-sm">MULTI SPECIALITY HOSPITAL</span>
-              <span className="text-xs">from Core to Care, Your Bridge to Healthcare</span>
-            </div>
-          </div>
-          <div className="text-center font-bold text-2xl">
-            INVESTIGATION SHEET
-          </div>
-          <div>
-            <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center text-xs">
-              LOGO
-            </div>
-          </div>
+        <div className="text-center font-bold text-2xl mb-5">
+          INVESTIGATION SHEET
         </div>
 
-        <div className="border border-gray-400 rounded-md overflow-hidden mb-6">
+        <PatientDetailsHeader ipdId={ipdId} />
+
+        <div className="border border-gray-400 rounded-md overflow-hidden mb-12">
           <div className="grid grid-cols-[150px_repeat(4,minmax(0,1fr))]">
-            <div className="bg-gray-200 text-center font-bold text-xs p-2 border-r border-gray-400">
+            <div className="bg-gray-200 text-center font-bold text-xs p-2 pt-3 border-r border-gray-400">
               Investigation
             </div>
             {Array(4).fill('').map((_, index) => (
@@ -228,7 +218,7 @@ const InvestigationSheetPage = ({ ipdId }: { ipdId: string }) => {
                     newColumns[index] = e.target.value;
                     setFormData({ ...formData, fixedColumns: newColumns });
                   }}
-                  className="w-full text-center bg-transparent focus:outline-none"
+                  className="w-full text-center bg-transparent focus:outline-none pt-1 pb-1"
                   placeholder="Enter Date"
                 />
               </div>
@@ -254,7 +244,7 @@ const InvestigationSheetPage = ({ ipdId }: { ipdId: string }) => {
           <div className="font-bold text-center text-sm bg-gray-200 p-2 border-b border-gray-400">
             MICROBIOLOGY
           </div>
-          <div className="flex justify-end p-2">
+          <div className="flex justify-end p-2 no-pdf">
             <button onClick={() => addRow('microbiology')} className="bg-blue-500 text-white text-xs px-2 py-1 rounded-md mr-2 hover:bg-blue-600 transition-colors duration-200">
               + Row
             </button>
@@ -282,7 +272,7 @@ const InvestigationSheetPage = ({ ipdId }: { ipdId: string }) => {
           <div className="font-bold text-center text-sm bg-gray-200 p-2 border-b border-gray-400">
             IMAGING
           </div>
-          <div className="flex justify-end p-2">
+          <div className="flex justify-end p-2 no-pdf">
             <button onClick={() => addRow('imaging')} className="bg-blue-500 text-white text-xs px-2 py-1 rounded-md mr-2 hover:bg-blue-600 transition-colors duration-200">
               + Row
             </button>
@@ -306,7 +296,7 @@ const InvestigationSheetPage = ({ ipdId }: { ipdId: string }) => {
           <div className="font-bold text-center text-sm bg-gray-200 p-2 border-b border-gray-400">
             MISCELLANEOUS
           </div>
-          <div className="flex justify-end p-2">
+          <div className="flex justify-end p-2 no-pdf">
             <button onClick={() => addRow('miscellaneous')} className="bg-blue-500 text-white text-xs px-2 py-1 rounded-md mr-2 hover:bg-blue-600 transition-colors duration-200">
               + Row
             </button>
@@ -316,17 +306,24 @@ const InvestigationSheetPage = ({ ipdId }: { ipdId: string }) => {
           </div>
           <div className="grid grid-cols-2 font-bold text-center text-xs bg-gray-200">
             <div className="p-2 border-r border-gray-400">Date</div>
-            <div className="p-2">Organism</div>
+            <div className="p-2">Investigation</div>
           </div>
           {formData.miscellaneous.map((row, index) => (
             <div key={index} className="grid grid-cols-2 text-center text-xs border-t border-gray-400">
-              <input type="text" name="date" value={row.date} onChange={(e) => handleDynamicInputChange(e, index, 'miscellaneous', 'date')} className="p-2 border-r border-gray-400 focus:outline-none" />
+              <input
+                type="text"
+                name="date"
+                value={row.date}
+                onChange={(e) => handleDynamicInputChange(e, index, 'miscellaneous', 'date')}
+                className="p-2 border-r border-gray-400 focus:outline-none"
+              />
               <input type="text" name="organism" value={row.organism} onChange={(e) => handleDynamicInputChange(e, index, 'miscellaneous', 'organism')} className="p-2 focus:outline-none" />
             </div>
           ))}
         </div>
 
-        <div className="flex justify-end mt-4">
+        <div className="flex justify-end mt-4 space-x-4 no-pdf">
+          <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="InvestigationSheetPage" />
           <button
             onClick={handleSave}
             disabled={isSaving}

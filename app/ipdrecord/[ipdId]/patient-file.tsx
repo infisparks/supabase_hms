@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import PdfGenerator from "./PdfGenerator"; // Import PdfGenerator
 
 // --- Type Definitions ---
 interface PatientFileData {
@@ -34,6 +36,19 @@ interface PatientFileData {
   allergy: string;
   mlc: boolean;
   nonMlc: boolean;
+}
+
+interface IPDRegistrationData {
+  uhid: string;
+  under_care_of_doctor: string | null;
+  admission_date: string | null;
+  patient_detail: {
+    name: string;
+    number: string | null;
+    age: number | null;
+    gender: string | null;
+  } | null;
+  bed_management: { room_type: string; bed_number: number | string } | null;
 }
 
 // --- Initial State for the Form ---
@@ -72,21 +87,62 @@ const PatientFileForm = ({ ipdId }: { ipdId: string }) => {
   const [formData, setFormData] = useState<PatientFileData>(initialPatientFileData);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null); // Create the ref
 
-  const fetchPatientFileData = useCallback(async () => {
+  const fetchAndSetPatientData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      // Fetch existing patient file data
+      const { data: fileData, error: fileError } = await supabase
         .from("ipd_record")
         .select("patient_file_data")
         .eq("ipd_id", ipdId)
         .single();
 
-      if (error && error.code !== "PGRST116") throw error;
+      // Fetch patient details from ipd_registration
+      const { data: regData, error: regError } = await supabase
+        .from("ipd_registration")
+        .select(
+          `
+          uhid,
+          patient_detail (name, number, age, gender),
+          bed_management (room_type, bed_number),
+          under_care_of_doctor,
+          admission_date
+        `
+        )
+        .eq("ipd_id", ipdId)
+        .single<IPDRegistrationData>();
 
-      if (data?.patient_file_data) {
-        setFormData(data.patient_file_data as PatientFileData);
+      if (regError) throw regError;
+
+      // Combine fetched data with default values
+      const fetchedInitialData = {
+        patientName: regData?.patient_detail?.name || "",
+        age: regData?.patient_detail?.age?.toString() || "",
+        sex: regData?.patient_detail?.gender || "",
+        dateOfAdmission: regData?.admission_date || "",
+        uhidNo: regData?.uhid || "",
+        ipdNo: ipdId,
+        contactNo: regData?.patient_detail?.number || "",
+        nameOfConsultant: regData?.under_care_of_doctor || "",
+        bedNameAndNo: `${regData?.bed_management?.room_type || ""}/${regData?.bed_management?.bed_number || ""}`,
+      };
+
+      // Start with the initial state and merge fetched data on top
+      const mergedData = {
+        ...initialPatientFileData,
+        ...fetchedInitialData
+      };
+
+
+      if (fileData?.patient_file_data) {
+        // If file data exists, merge it over the mergedData
+        setFormData({ ...mergedData, ...fileData.patient_file_data });
         toast.success("Patient file data loaded.");
+      } else {
+        // Otherwise, just use the mergedData
+        setFormData(mergedData);
       }
     } catch (error) {
       console.error("Failed to fetch patient file data:", error);
@@ -97,13 +153,15 @@ const PatientFileForm = ({ ipdId }: { ipdId: string }) => {
   }, [ipdId]);
 
   useEffect(() => {
-    if (ipdId) fetchPatientFileData();
-  }, [ipdId, fetchPatientFileData]);
+    if (ipdId) fetchAndSetPatientData();
+  }, [ipdId, fetchAndSetPatientData]);
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
         toast.error("User not authenticated. Cannot save data.");
         setIsSaving(false);
@@ -142,7 +200,7 @@ const PatientFileForm = ({ ipdId }: { ipdId: string }) => {
         }
         return { ...prev, [group]: newGroup };
       }
-      
+
       return { ...prev, [field]: !(prev as any)[field] };
     });
   };
@@ -161,7 +219,7 @@ const PatientFileForm = ({ ipdId }: { ipdId: string }) => {
   const inputClass = "flex-grow p-1 focus:outline-none bg-transparent";
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-xl max-w-4xl mx-auto font-sans text-xs">
+    <div ref={formRef} className="bg-white p-6 rounded-lg shadow-xl max-w-4xl mx-auto font-sans text-xs">
       <div className="text-center mb-6">
         <h2 className="font-bold text-lg">INDOOR PATIENT FILE</h2>
       </div>
@@ -320,7 +378,8 @@ const PatientFileForm = ({ ipdId }: { ipdId: string }) => {
         </div>
       </div>
 
-      <div className="flex justify-end mt-6">
+      <div className="flex justify-end mt-6 space-x-4 no-pdf">
+        <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="PatientFileForm" />
         <button
           onClick={handleSave}
           disabled={isSaving}

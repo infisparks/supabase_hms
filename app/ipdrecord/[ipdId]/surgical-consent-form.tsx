@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
+import PatientDetailsHeader from "./PatientDetailsHeader";
+import PdfGenerator from "./PdfGenerator";
 
 // --- Type Definitions ---
 interface SurgicalConsentData {
@@ -110,20 +112,21 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
     signatureOfWitness: false,
     signatureOfAnesthesiologist: false,
   });
+  const formRef = useRef<HTMLDivElement>(null); // Create the ref
 
   const fetchConsentData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: consentData, error: consentError } = await supabase
         .from("ipd_record")
         .select("surgical_consent_data")
         .eq("ipd_id", ipdId)
         .single();
 
-      if (error && error.code !== "PGRST116") throw error;
+      if (consentError && consentError.code !== "PGRST116") throw consentError;
 
-      if (data?.surgical_consent_data) {
-        setFormData(data.surgical_consent_data as SurgicalConsentData);
+      if (consentData?.surgical_consent_data) {
+        setFormData(consentData.surgical_consent_data as SurgicalConsentData);
         toast.success("Surgical consent data loaded.");
       }
     } catch (error) {
@@ -147,16 +150,16 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
         setIsSaving(false);
         return;
       }
-      
+
       const dataToSave = { ...formData };
-      
+
       (Object.keys(dataToSave) as Array<keyof typeof dataToSave>).forEach(key => {
         const value = dataToSave[key];
         if (key.startsWith("signature") && typeof value === 'string' && value.length === 10 && !value.startsWith('http')) {
           (dataToSave as any)[key] = '';
         }
       });
-      
+
       const { error } = await supabase.from("ipd_record").upsert(
         {
           ipd_id: ipdId,
@@ -179,7 +182,7 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, field: keyof SurgicalConsentData) => {
     setFormData((prev) => ({ ...prev, [field]: e.target.value }));
   };
-  
+
   const checkAndSetSignature = useCallback(async (password: string, field: keyof SurgicalConsentData) => {
     if (password.length !== 10) return;
     const signatureKey = field as keyof typeof isVerifyingSignature;
@@ -190,7 +193,7 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
         .select('signature_url')
         .eq('password', password)
         .single();
-      
+
       if (error && error.code !== 'PGRST116') throw error;
 
       if (data?.signature_url) {
@@ -207,10 +210,10 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
       setIsVerifyingSignature(prev => ({ ...prev, [signatureKey]: false }));
     }
   }, []);
-  
+
   const handleSignatureReset = (field: keyof SurgicalConsentData) => {
     if (window.confirm("Are you sure you want to remove this signature?")) {
-      setFormData(prev => ({...prev, [field]: ''}));
+      setFormData(prev => ({ ...prev, [field]: '' }));
       toast.info("Signature has been cleared.");
     }
   };
@@ -218,7 +221,7 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
   const renderSignatureInput = (field: keyof SurgicalConsentData) => {
     const signatureKey = field as keyof typeof isVerifyingSignature;
     const isVerifying = isVerifyingSignature[signatureKey];
-    
+
     return (
       <div className="flex-grow p-1 border-b border-gray-300 focus:outline-none h-12 flex items-center justify-center">
         {isVerifying ? (
@@ -264,46 +267,13 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
   }
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-xl max-w-4xl mx-auto font-sans text-xs">
+    <div ref={formRef} className="bg-white p-6 rounded-lg shadow-xl max-w-4xl mx-auto font-sans text-xs">
       <div className="text-center mb-6">
         <h2 className="font-bold text-lg">CONSENT FORM</h2>
       </div>
 
-      {/* Patient Details Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2 mb-6">
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Name of Patient:</label>
-          <input type="text" value={formData.patientName} onChange={(e) => handleInputChange(e, "patientName")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Age/Sex:</label>
-          <input type="text" value={formData.ageSex} onChange={(e) => handleInputChange(e, "ageSex")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Room/Ward No:</label>
-          <input type="text" value={formData.roomWardNo} onChange={(e) => handleInputChange(e, "roomWardNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>UHID No:</label>
-          <input type="text" value={formData.uhidNo} onChange={(e) => handleInputChange(e, "uhidNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>IPD No:</label>
-          <input type="text" value={formData.ipdNo} onChange={(e) => handleInputChange(e, "ipdNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Contact No.:</label>
-          <input type="text" value={formData.contactNo} onChange={(e) => handleInputChange(e, "contactNo")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Under Care of Doctor:</label>
-          <input type="text" value={formData.underCareOfDoctor} onChange={(e) => handleInputChange(e, "underCareOfDoctor")} className={inputClass} />
-        </div>
-        <div className="flex items-center col-span-2">
-          <label className={labelClass}>Admission Date:</label>
-          <input type="text" value={formData.admissionDate} onChange={(e) => handleInputChange(e, "admissionDate")} className={inputClass} />
-        </div>
-      </div>
+      {/* Patient Details Section - Now using the new component */}
+      <PatientDetailsHeader ipdId={ipdId} />
 
       <div className="space-y-4">
         {/* Consent Text Section */}
@@ -313,7 +283,7 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
           <p>Dr. <input type="text" value={formData.anesthetist} onChange={(e) => handleInputChange(e, "anesthetist")} className="w-1/4 p-1 border-b border-gray-300 focus:outline-none bg-transparent" />, Anesthesiologist, did evaluate me for risks involved in anesthetizing me to undergo above procedure. I have willfully consented to be anesthetized. However, in the opinion of anesthethesiologist there is significant risk has no the risk factor and the consequences have been discussed in details with me, in the language and manner that I could understand. Summary of which is given here-below: </p>
           <p className="mt-2">I have been advised that high risk(s) involved in the above procedures are: </p>
           <textarea value={formData.highRisk} onChange={(e) => handleInputChange(e, "highRisk")} className="w-full p-2 border border-gray-300 focus:outline-none rounded-md resize-none h-16" />
-          
+
           <div className="flex items-center">
             <label className={labelClass}>I have been educated in language:</label>
             <input type="text" value={formData.language} onChange={(e) => handleInputChange(e, "language")} className={inputClass} />
@@ -327,7 +297,7 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
 
           <p className="mt-2">I authorize Dr. <input type="text" value={formData.authorizeDoctor} onChange={(e) => handleInputChange(e, "authorizeDoctor")} className="w-1/4 p-1 border-b border-gray-300 focus:outline-none bg-transparent" /> or associates and such / assistants as may be selected by him / her to anesthetize me for the procedure.</p>
           <p className="mt-2">Therefore, I also consent and authorize rendering of such other care and treatment as my clinician or his designee reasonably believes necessary should one or more of these or other unforeseeable events occur.</p>
-          
+
           <p className="flex items-center space-x-4 mt-2">
             I refuse to authorize Dr. <input type="text" value={formData.refuseToAnesthetize} onChange={(e) => handleInputChange(e, "refuseToAnesthetize")} className="w-1/4 p-1 border-b border-gray-300 focus:outline-none bg-transparent" /> to anesthetize me for the procedure.
           </p>
@@ -439,7 +409,8 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
         </div>
       </div>
 
-      <div className="flex justify-end mt-6">
+      <div className="flex justify-end mt-6 no-pdf">
+        <PdfGenerator contentRef={formRef as React.RefObject<HTMLDivElement>} fileName="SurgicalConsentForm" />
         <button
           onClick={handleSave}
           disabled={isSaving}
