@@ -29,6 +29,7 @@ import BloodTransfusionRecord from "./blood-transfusion-record";
 import SurgicalConsentForm from "./surgical-consent-form"; 
 import DischargeAgainstMedicalAdvice from "./discharge-against-medical-advice"; 
 import DischargeSummary from "./discharge-summary"; 
+import WritingPad from "./WritingPad"; // <-- NEW IMPORT
 
 // --- Type Definitions ---
 interface PatientDetails {
@@ -57,13 +58,14 @@ const IPDRecordPage = () => {
   const { ipdId } = useParams();
   const [patientDetails, setPatientDetails] = useState<PatientDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("patient-file"); // <-- SET THE NEW DEFAULT TAB
+  const [activeTab, setActiveTab] = useState("writing-pad"); // <-- SET NEW DEFAULT
 
   const tabs = [
     { value: "surgical-consent", label: "Surgical Consent" },
     { value: "blood-transfusion-record", label: "Transfusion Record" },
     { value: "blood-transfusion-consent", label: "Blood Consent" },
     { value: "patient-file", label: "Patient File" },
+    { value: "writing-pad", label: "Writing Pad" }, // <-- NEW TAB
     { value: "charge", label: "Charges" },
     { value: "glucose", label: "Glucose" },
     { value: "admission", label: "Admission" },
@@ -171,6 +173,12 @@ const IPDRecordPage = () => {
           ))}
         </TabsList>
         
+        {/* --- ADD NEW TAB CONTENT HERE --- */}
+        <TabsContent value="writing-pad" className="mt-6">
+          <WritingPad ipdId={ipdId as string} />
+        </TabsContent>
+        {/* ---------------------------------- */}
+        
         <TabsContent value="patient-file" className="mt-6">
           <PatientFileForm ipdId={ipdId as string} />
         </TabsContent>
@@ -244,7 +252,7 @@ const IPDRecordPage = () => {
         </TabsContent>
 
         {/* Placeholder Tabs for other content */}
-        {tabs.filter(t => !["admission", "charge", "glucose", "investigation", "progress", "nurse", "vital", "doctor", "drug-chart", "iv-infusion", "clinical-notes", "emergency-care", "patient-file", "blood-transfusion-consent", "blood-transfusion-record", "surgical-consent", "discharge-against-medical-advice", "discharge"].includes(t.value)).map(tab => (
+        {tabs.filter(t => !["admission", "charge", "glucose", "investigation", "progress", "nurse", "vital", "doctor", "drug-chart", "iv-infusion", "clinical-notes", "emergency-care", "patient-file", "blood-transfusion-consent", "blood-transfusion-record", "surgical-consent", "discharge-against-medical-advice", "discharge", "writing-pad"].includes(t.value)).map(tab => (
           <TabsContent key={tab.value} value={tab.value} className="mt-6">
             <Card className="bg-white shadow-md p-6">
               <CardTitle className="text-lg font-semibold text-gray-800">
