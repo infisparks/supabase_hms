@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import { useForm, Controller, FormProvider, useFieldArray } from "react-hook-form"
 import { useRouter, useParams } from "next/navigation"
 import { ToastContainer, toast } from "react-toastify"
-import "react-toastify/dist/ReactToastify.css" // Ensure toastify CSS is imported
+import "react-toastify/dist/ReactToastify.css"
 
 // Supabase client import
 import { supabase } from "@/lib/supabase"
@@ -42,8 +42,8 @@ import {
 } from "lucide-react"
 
 // Import the new custom input component
-import EditableChargesInput from "@/components/ui/input-new"; // Adjust path as needed
-import { SearchableSelect } from "@/components/global/searchable-select";
+import EditableChargesInput from "@/components/ui/input-new" // Adjust path as needed
+import { SearchableSelect } from "@/components/global/searchable-select"
 
 // Type Definitions and Options
 import {
@@ -124,9 +124,9 @@ const EditAppointmentPage = () => {
   const [isSearching, setIsSearching] = useState(false)
   const [selectedPatient, setSelectedPatient] = useState<PatientDetail | null>(null)
   const [currentBillNo, setCurrentBillNo] = useState<number | null>(null)
-  // State to track which charges input is currently being edited
-  const [editingChargeIndex, setEditingChargeIndex] = useState<number | null>(null);
-
+  const [editingChargeIndex, setEditingChargeIndex] = useState<number | null>(null)
+  // FIX: New state to track if initial data is loaded
+  const [isDataLoaded, setIsDataLoaded] = useState(false)
 
   const router = useRouter()
   const params = useParams()
@@ -170,7 +170,7 @@ const EditAppointmentPage = () => {
     setValue,
     handleSubmit,
     reset,
-    getValues, // Added to get current form values for bill generation
+    getValues,
   } = form
 
   const { fields, append, remove } = useFieldArray({
@@ -183,6 +183,7 @@ const EditAppointmentPage = () => {
   const watchedAppointmentType = watch("appointmentType")
   const watchedCashAmount = watch("cashAmount")
   const watchedOnlineAmount = watch("onlineAmount")
+  const watchedDiscount = watch("discount")
 
   // --- Initial Data Fetch ---
   useEffect(() => {
@@ -193,7 +194,6 @@ const EditAppointmentPage = () => {
   }, [])
 
   useEffect(() => {
-    // Fetch on-call appointments only when the "oncall" tab is active
     if (activeTab === "oncall") {
       const loadOnCall = async () => {
         setOnCallAppointments(await fetchOnCallAppointmentsSupabase())
@@ -222,7 +222,6 @@ const EditAppointmentPage = () => {
         if (error) throw error
 
         if (data) {
-          // Check if patient_detail is valid before setting selectedPatient
           if (!data.patient_detail || !data.patient_detail.patient_id || !data.patient_detail.uhid) {
             console.error("Fetched appointment data is missing patient_detail or its ID/UHID:", data)
             toast.error("Failed to load patient details for editing. Missing patient ID or UHID.")
@@ -236,27 +235,27 @@ const EditAppointmentPage = () => {
           setValue("age", data.patient_detail.age ? Number(data.patient_detail.age) : undefined, {
             shouldValidate: true,
           })
-          // Ensure ageUnit defaults to "year" if not provided or invalid
-          const ageUnit = data.patient_detail.age_unit && ["year", "month", "day"].includes(data.patient_detail.age_unit) ? data.patient_detail.age_unit : "year"
+          const ageUnit =
+            data.patient_detail.age_unit && ["year", "month", "day"].includes(data.patient_detail.age_unit)
+              ? data.patient_detail.age_unit
+              : "year"
           setValue("ageUnit", ageUnit, { shouldValidate: true })
           setValue("gender", data.patient_detail.gender || "", { shouldValidate: true })
           setValue("address", data.patient_detail.address || "")
           setValue("referredBy", data.refer_by || "")
           setValue("additionalNotes", data["additional Notes"] || "")
           setValue("paymentMethod", data.payment_info?.paymentMethod || "cash")
+          // FIX: Correctly set the initial values from the fetched data
           setValue("cashAmount", data.payment_info?.cashAmount || undefined)
           setValue("onlineAmount", data.payment_info?.onlineAmount || undefined)
           setValue("discount", data.payment_info?.discount || 0)
           setValue("onlineThrough", data.payment_info?.onlineThrough || "upi")
           setValue("cashThrough", data.payment_info?.cashThrough || "cash")
           setValue("date", new Date(data.date))
-          // Removed: setValue("time", data.time || formatAMPM(new Date())) as opd_registration does not have a time column
           setValue("uhid", data.patient_detail.uhid || "")
-          setValue("opdType", data.opdType || "OPD") // Ensure opdType is set
-          setCurrentBillNo(data.bill_no) // Set the current bill number
+          setValue("opdType", data.opdType || "OPD")
+          setCurrentBillNo(data.bill_no)
 
-          // Set selected patient for read-only fields
-          // Ensure patient_id is number and uhid is string, as per schema
           setSelectedPatient({
             patient_id: data.patient_detail.patient_id as number,
             uhid: data.patient_detail.uhid as string,
@@ -267,123 +266,80 @@ const EditAppointmentPage = () => {
             gender: data.patient_detail.gender || "",
             address: data.patient_detail.address || "",
           })
-          console.log("Selected Patient after fetch:", {
-            patient_id: data.patient_detail.patient_id,
-            uhid: data.patient_detail.uhid,
-          })
 
-          // Populate modalities using useFieldArray's replace
-          // Map doctor name to doctor id for dropdown
           const mappedModalities = (data.service_info || []).map((modality: any) => {
-            // If doctor is already an ID, keep as is; if it's a name, map to ID
-            const doctorObj = doctors.find((d) => d.dr_name === modality.doctor || d.id === modality.doctor);
+            const doctorObj = doctors.find((d) => d.dr_name === modality.doctor || d.id === modality.doctor)
             return {
               ...modality,
               doctor: doctorObj ? doctorObj.id : modality.doctor,
-            };
-          });
+            }
+          })
           form.setValue("modalities", mappedModalities)
           setActiveTab("book")
-          // toast.success("Appointment data loaded for editing.")
+          // FIX: Set data loaded flag to true
+          setIsDataLoaded(true)
         } else {
           toast.error("Appointment not found or unable to load.")
-          router.push("/opd/list") // Redirect if not found
+          router.push("/opd/list")
         }
       } catch (error) {
         console.error("Error fetching appointment for edit:", error)
         toast.error("Failed to load appointment for editing.")
-        router.push("/opd/list") // Redirect on error
+        router.push("/opd/list")
       } finally {
         setIsLoading(false)
       }
     }
-    fetchAppointmentForEdit()
-  }, [opdId, setValue, router, form, doctors]) // Added 'doctors' to the dependency array
+    if (doctors.length > 0) {
+      fetchAppointmentForEdit()
+    }
+  }, [opdId, setValue, router, form, doctors])
 
-  // --- Utility Functions ---
+  // FIX: This useEffect now only runs after the initial data has been loaded.
+  // This prevents it from overwriting the initial values fetched from the database.
+  useEffect(() => {
+    // Only run if the data has been loaded AND we're on a hospital visit
+    if (isDataLoaded && watchedAppointmentType === "visithospital") {
+      const totalCharges = totalModalityCharges
+      const cashAmount = Number(watchedCashAmount) || 0
+      const onlineAmount = Number(watchedOnlineAmount) || 0
+      const totalPaid = cashAmount + onlineAmount
+
+      // If the total paid amount is less than the total charges, calculate the new discount
+      const newDiscount = Math.max(0, totalCharges - totalPaid)
+
+      // Only update the discount if the calculated value is different from the current one
+      if (newDiscount !== watchedDiscount) {
+        setValue("discount", newDiscount, { shouldValidate: true })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedCashAmount, watchedOnlineAmount, setValue, isDataLoaded, watchedDiscount, watchedAppointmentType])
+
+  // Moved getTotalModalityCharges above its first usage to fix lint error.
   const getTotalModalityCharges = useCallback(() => {
     return watchedModalities.reduce((total, modality) => total + modality.charges, 0)
   }, [watchedModalities])
 
   const totalModalityCharges = useMemo(() => getTotalModalityCharges(), [getTotalModalityCharges])
 
-  // Auto-fill cash/online amount based on total charges and payment method (replicated from booking)
-  useEffect(() => {
-    if (
-      watchedAppointmentType === "visithospital" &&
-      watchedModalities.length > 0 &&
-      (watchedCashAmount === undefined ||
-        watchedOnlineAmount === undefined ||
-        (watchedCashAmount === 0 && watchedOnlineAmount === 0))
-    ) {
-      const total = totalModalityCharges
-      if (watchedPaymentMethod === "cash") {
-        setValue("cashAmount", total)
-        setValue("onlineAmount", 0)
-      } else if (
-        watchedPaymentMethod === "online" ||
-        watchedPaymentMethod === "card-credit" ||
-        watchedPaymentMethod === "card-debit"
-      ) {
-        setValue("onlineAmount", total)
-        setValue("cashAmount", 0)
-      } else if (watchedPaymentMethod === "mixed") {
-        if (watchedCashAmount === undefined && watchedOnlineAmount === undefined) {
-          setValue("cashAmount", total)
-          setValue("onlineAmount", 0)
-        }
-      }
-      setValue("discount", 0)
-    }
-  }, [
-    watchedModalities.length,
-    watchedAppointmentType,
-    totalModalityCharges,
-    setValue,
-    watchedCashAmount,
-    watchedOnlineAmount,
-    watchedPaymentMethod,
-  ])
-
-  // Calculate discount based on total charges and amount paid (replicated from booking)
-  useEffect(() => {
-    if (watchedAppointmentType !== "visithospital") return
-    const totalCharges = totalModalityCharges
-    const cashAmount = Number(watchedCashAmount) || 0
-    const onlineAmount = Number(watchedOnlineAmount) || 0
-    const totalPaid = cashAmount + onlineAmount
-    const discount = Math.max(0, totalCharges - totalPaid)
-    if (watch("discount") !== discount) {
-      setValue("discount", discount)
-    }
-  }, [
-    watchedAppointmentType,
-    watchedPaymentMethod,
-    watchedCashAmount,
-    watchedOnlineAmount,
-    totalModalityCharges,
-    setValue,
-    watch,
-  ])
-
-  // Calculate total amount paid for summary
   const calculateTotalAmountPaid = () => {
     const cashAmount = Number(watchedCashAmount) || 0
     const onlineAmount = Number(watchedOnlineAmount) || 0
     return cashAmount + onlineAmount
   }
 
-  // --- Patient Search and Selection ---
   const fillFormWithPatientData = (patient: PatientDetail) => {
     setValue("name", patient.name || "", { shouldValidate: true })
     setValue("phone", patient.number || "", { shouldValidate: true })
     setValue("age", patient.age ? Number(patient.age) : undefined, { shouldValidate: true })
-    setValue("ageUnit", patient.age_unit || "year", { shouldValidate: true })
+    const ageUnit = patient.age_unit && ["year", "month", "day"].includes(patient.age_unit) ? patient.age_unit : "year"
+    setValue("ageUnit", ageUnit, { shouldValidate: true })
     setValue("gender", patient.gender || "", { shouldValidate: true })
     setValue("address", patient.address || "")
-    setValue("referredBy", "") // Clear referred by when selecting new patient
-    setValue("additionalNotes", "") // Clear notes
-    setValue("paymentMethod", "cash") // Reset payment
+    setValue("referredBy", "")
+    setValue("additionalNotes", "")
+    setValue("paymentMethod", "cash")
     setValue("cashAmount", undefined)
     setValue("onlineAmount", undefined)
     setValue("discount", 0)
@@ -391,8 +347,7 @@ const EditAppointmentPage = () => {
     setValue("cashThrough", "cash")
     setValue("uhid", patient.uhid || "")
     setSelectedPatient(patient)
-    console.log("Selected Patient after search/fill:", { patient_id: patient.patient_id, uhid: patient.uhid })
-    setValue("modalities", []) // Clear modalities
+    setValue("modalities", [])
     setActiveTab("book")
     setSearchUhIdInput("")
     setSearchPhoneInput("")
@@ -430,49 +385,40 @@ const EditAppointmentPage = () => {
     setSearchedPatientResults(null)
     setSearchUhIdInput("")
     setSearchPhoneInput("")
-    setEditingChargeIndex(null); // Reset editing state on form reset
+    setEditingChargeIndex(null)
   }
 
-  // Handle patient selection from search results
   const handlePatientSelect = (patient: PatientDetail) => {
     fillFormWithPatientData(patient)
     setValue("uhid", patient.uhid)
     setActiveTab("book")
   }
 
-  // Handle manual changes to name/phone (clears selected patient)
-  // --- handlers that no longer drop patient_id & uhid while editing ---
-
-const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-  const newName = e.target.value
-  setValue("name", newName)
-
-  if (opdId && selectedPatient) {
-    // we’re editing an existing record → keep IDs, just update the local copy
-    setSelectedPatient({ ...selectedPatient, name: newName })
-  } else {
-    // new booking flow → clear the previous selection
-    setSelectedPatient(null)
-    setValue("uhid", "")
-    setSearchUhIdInput("")
-    setSearchedPatientResults(null)
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newName = e.target.value
+    setValue("name", newName)
+    if (opdId && selectedPatient) {
+      setSelectedPatient({ ...selectedPatient, name: newName })
+    } else {
+      setSelectedPatient(null)
+      setValue("uhid", "")
+      setSearchUhIdInput("")
+      setSearchedPatientResults(null)
+    }
   }
-}
 
-const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-  const newNumber = e.target.value
-  setValue("phone", newNumber)
-
-  if (opdId && selectedPatient) {
-    setSelectedPatient({ ...selectedPatient, number: newNumber })
-  } else {
-    setSelectedPatient(null)
-    setValue("uhid", "")
-    setSearchUhIdInput("")
-    setSearchedPatientResults(null)
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newNumber = e.target.value
+    setValue("phone", newNumber)
+    if (opdId && selectedPatient) {
+      setSelectedPatient({ ...selectedPatient, number: newNumber })
+    } else {
+      setSelectedPatient(null)
+      setValue("uhid", "")
+      setSearchUhIdInput("")
+      setSearchedPatientResults(null)
+    }
   }
-}
-
 
   const handleSearchByUhId = async () => {
     if (!searchUhIdInput.trim()) {
@@ -531,26 +477,23 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     }
   }
 
-  // --- Modality Management (using useFieldArray) ---
   const addModality = (type: ModalitySelection["type"]) => {
-    append({ id: Math.random().toString(36).substr(2, 9), type, charges: 0, doctor: "" }) // Initialize doctor for all
+    append({ id: Math.random().toString(36).substr(2, 9), type, charges: 0, doctor: "" })
   }
 
   const updateModality = (index: number, updates: Partial<ModalitySelection>) => {
-    const newModalities = [...fields] // Use 'fields' from useFieldArray
+    const newModalities = [...fields]
     newModalities[index] = { ...newModalities[index], ...updates }
-    setValue("modalities", newModalities as ModalitySelection[]) // Update form state
+    setValue("modalities", newModalities as ModalitySelection[])
   }
 
   const removeModality = (index: number) => {
-    remove(index) // Use useFieldArray's remove
-    // If the removed modality was being edited, reset the editing state
+    remove(index)
     if (editingChargeIndex === index) {
-      setEditingChargeIndex(null);
+      setEditingChargeIndex(null)
     }
-    // Adjust editing index if a modality before the currently edited one is removed
     if (editingChargeIndex !== null && index < editingChargeIndex) {
-      setEditingChargeIndex(editingChargeIndex - 1);
+      setEditingChargeIndex(editingChargeIndex - 1)
     }
   }
 
@@ -560,22 +503,19 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     return doc ? doc.dr_name : doctorId
   }
 
-  // This specific handler will be passed to EditableChargesInput for saving charges
   const handleSaveCharges = (index: number, newValue: number) => {
-    const currentModalities = getValues("modalities");
-    const newModalitiesArray = [...currentModalities]; // Create a new array reference
-    newModalitiesArray[index] = { ...newModalitiesArray[index], charges: newValue }; // Update the specific item
+    const currentModalities = getValues("modalities")
+    const newModalitiesArray = [...currentModalities]
+    newModalitiesArray[index] = { ...newModalitiesArray[index], charges: newValue }
 
     setValue("modalities", newModalitiesArray as ModalitySelection[], {
       shouldValidate: true,
       shouldDirty: true,
       shouldTouch: true,
-    });
-    setEditingChargeIndex(null); // Exit editing mode for this input
-  };
+    })
+    setEditingChargeIndex(null)
+  }
 
-
-  // --- Form Submission ---
   const onSubmit = async (data: IFormInput) => {
     setIsLoading(true)
     try {
@@ -592,7 +532,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         return
       }
 
-      // Validation for required doctor field on modalities
       if (data.appointmentType === "visithospital") {
         for (const modality of data.modalities) {
           if (!modality.doctor || String(modality.doctor).trim() === "") {
@@ -603,7 +542,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         }
       }
 
-      // Crucial check: Ensure selectedPatient has valid ID and UHID before calling updateAppointment
       console.log("Submitting form. Current selectedPatient:", selectedPatient)
       if (!selectedPatient?.patient_id || !selectedPatient?.uhid) {
         toast.error("Patient details (ID or UHID) are missing. Cannot update appointment.")
@@ -617,13 +555,13 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         watchedModalities,
         totalModalityCharges,
         calculateTotalAmountPaid(),
-        selectedPatient.patient_id, // Pass patient_id as number
-        selectedPatient.uhid, // Pass uhid as string
+        selectedPatient.patient_id,
+        selectedPatient.uhid,
       )
 
       if (result.success) {
         toast.success(result.message)
-        router.push("/opd/list") // Redirect to appointment list
+        router.push("/opd/list")
       } else {
         toast.error(result.message)
       }
@@ -635,9 +573,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     }
   }
 
-  // --- Handle View Bill ---
   const handleViewBill = async () => {
-    // Before proceeding, check if necessary data exists
     if (!opdId) {
       toast.error("Cannot view bill: Appointment ID is missing.")
       return
@@ -655,23 +591,20 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       return
     }
 
-    const currentFormData = getValues() // Get all current form values from react-hook-form
+    const currentFormData = getValues()
 
-    // Construct the data payload for bill generation
-    // Ensure all numeric fields are actual numbers, not strings or undefined
     const billDataForGeneration: IFormInput = {
       ...currentFormData,
       age: Number(currentFormData.age) || 0,
       cashAmount: Number(currentFormData.cashAmount) || 0,
       onlineAmount: Number(currentFormData.onlineAmount) || 0,
       discount: Number(currentFormData.discount) || 0,
-      // Crucially, use the 'watchedModalities' for the most up-to-date services.
       modalities: watchedModalities.map((modality) => ({
         ...modality,
-        charges: Number(modality.charges) || 0, // Ensure charges within modalities are numbers
+        charges: Number(modality.charges) || 0,
       })),
       opdType: currentFormData.opdType || "OPD",
-      uhid: selectedPatient.uhid, // Ensure UHID from selectedPatient is passed
+      uhid: selectedPatient.uhid,
       date: currentFormData.date instanceof Date ? currentFormData.date : new Date(currentFormData.date),
       time: currentFormData.time || formatAMPM(new Date()),
     }
@@ -679,9 +612,9 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       await openBillInNewTabProgrammatically(
         billDataForGeneration,
-        selectedPatient.uhid, // Pass UHID from selectedPatient
-        doctors.map((d) => ({ id: d.id, dr_name: d.dr_name })), // Pass doctor details for name resolution
-        currentBillNo, // Pass the bill number
+        selectedPatient.uhid,
+        doctors.map((d) => ({ id: d.id, dr_name: d.dr_name })),
+        currentBillNo,
       )
     } catch (error) {
       console.error("Error generating or opening bill:", error)
@@ -689,14 +622,13 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     }
   }
 
-  // --- Handlers for On-Call List Actions ---
   const handleDeleteOnCall = async (onCallId: string) => {
     setIsLoading(true)
     try {
       const result = await deleteOnCallAppointment(onCallId)
       if (result.success) {
         toast.success(result.message)
-        setOnCallAppointments(await fetchOnCallAppointmentsSupabase()) // Refresh list
+        setOnCallAppointments(await fetchOnCallAppointmentsSupabase())
       } else {
         toast.error(result.message)
       }
@@ -719,7 +651,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 
       if (error) throw error
 
-      // Ensure patientData conforms to PatientDetail structure
       const formattedPatientData: PatientDetail = {
         patient_id: patientData.patient_id,
         uhid: patientData.uhid,
@@ -729,7 +660,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         age_unit: patientData.age_unit || "year",
         gender: patientData.gender || "",
         address: patientData.address || "",
-      };
+      }
 
       fillFormWithPatientData(formattedPatientData)
       setValue("appointmentType", "visithospital")
@@ -756,9 +687,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue("referredBy", appointment.referredBy || "")
     setValue("additionalNotes", appointment.additional_notes || "")
     setValue("date", new Date(appointment.date))
-    // Removed: setValue("time", appointment.time) as opd_oncall does not have a time column
     if (appointment.patient_id && appointment.uhid) {
-      // Ensure patient_id is number and uhid is string, and other fields are present
       const formattedPatientDetail: PatientDetail = {
         patient_id: appointment.patient_id as number,
         uhid: appointment.uhid as string,
@@ -766,7 +695,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         number: appointment.patient_detail?.number || "",
         age: appointment.patient_detail?.age || 0,
         gender: appointment.patient_detail?.gender || "",
-      };
+      }
       setSelectedPatient(formattedPatientDetail)
       setValue("uhid", appointment.uhid)
     }
@@ -844,7 +773,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                 placeholder="Enter patient name"
                                 className={`pl-10 ${errors.name ? "border-red-500" : ""}`}
                                 autoComplete="off"
-                                // Removed readOnly={!!selectedPatient && activeTab === "book"}
                               />
                             </div>
                             {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
@@ -871,7 +799,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                 placeholder="Enter 10-digit number"
                                 className={`pl-10 ${errors.phone ? "border-red-500" : ""}`}
                                 autoComplete="off"
-                                // Removed readOnly={!!selectedPatient && activeTab === "book"}
                               />
                             </div>
                             {errors.phone && <p className="text-sm text-red-500">{errors.phone.message}</p>}
@@ -896,7 +823,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                   placeholder="Enter age"
                                   className={`pl-10 ${errors.age ? "border-red-500" : ""}`}
                                   onWheel={(e) => e.currentTarget.blur()}
-                                  // Removed disabled={!!selectedPatient && activeTab === "book"}
                                 />
                               </div>
                               {errors.age && <p className="text-sm text-red-500">{errors.age.message}</p>}
@@ -910,11 +836,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                 name="ageUnit"
                                 rules={{ required: "Age unit is required" }}
                                 render={({ field }) => (
-                                  <Select
-                                    onValueChange={field.onChange}
-                                    value={field.value}
-                                    // Removed disabled={!!selectedPatient && activeTab === "book"}
-                                  >
+                                  <Select onValueChange={field.onChange} value={field.value}>
                                     <SelectTrigger className={errors.ageUnit ? "border-red-500" : ""}>
                                       <SelectValue placeholder="Select unit" />
                                     </SelectTrigger>
@@ -944,11 +866,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                               name="gender"
                               rules={{ required: "Gender is required" }}
                               render={({ field }) => (
-                                <Select
-                                  onValueChange={field.onChange}
-                                  value={field.value}
-                                  // Removed disabled={!!selectedPatient && activeTab === "book"}
-                                >
+                                <Select onValueChange={field.onChange} value={field.value}>
                                   <SelectTrigger className={errors.gender ? "border-red-500" : ""}>
                                     <SelectValue placeholder="Select gender" />
                                   </SelectTrigger>
@@ -1039,7 +957,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                   {...register("address")}
                                   placeholder="Enter address (optional)"
                                   className="pl-10 min-h-[60px]"
-                                  // Removed disabled={!!selectedPatient && activeTab === "book"}
                                 />
                               </div>
                             </div>
@@ -1119,9 +1036,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                       )}
                                     />
                                     {errors.modalities?.[index]?.doctor && (
-                                      <p className="text-sm text-red-500">
-                                        {errors.modalities[index]?.doctor?.message}
-                                      </p>
+                                      <p className="text-sm text-red-500">{errors.modalities[index]?.doctor?.message}</p>
                                     )}
                                   </div>
                                   {modality.type === "consultation" ? (
@@ -1133,7 +1048,10 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                           name={`modalities.${index}.specialist`}
                                           render={({ field }) => (
                                             <SearchableSelect
-                                              options={Array.from(new Set(doctors.flatMap((d) => d.specialist))).map((spec) => ({ value: spec, label: spec }))}
+                                              options={Array.from(new Set(doctors.flatMap((d) => d.specialist))).map((spec) => ({
+                                                value: spec,
+                                                label: spec,
+                                              }))}
                                               value={field.value || ""}
                                               onValueChange={(value) => field.onChange(value)}
                                               placeholder="Select specialist"
@@ -1142,9 +1060,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                           )}
                                         />
                                         {errors.modalities?.[index]?.specialist && (
-                                          <p className="text-sm text-red-500">
-                                            {errors.modalities[index]?.specialist?.message}
-                                          </p>
+                                          <p className="text-sm text-red-500">{errors.modalities[index]?.specialist?.message}</p>
                                         )}
                                       </div>
                                       <div className="space-y-2">
@@ -1167,10 +1083,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                                   const chargeData = doctor.charges[0]
                                                   if (value === "first" && chargeData.firstVisitCharge !== undefined) {
                                                     charges = chargeData.firstVisitCharge
-                                                  } else if (
-                                                    value === "followup" &&
-                                                    chargeData.followUpCharge !== undefined
-                                                  ) {
+                                                  } else if (value === "followup" && chargeData.followUpCharge !== undefined) {
                                                     charges = chargeData.followUpCharge
                                                   }
                                                 }
@@ -1186,9 +1099,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                           )}
                                         />
                                         {errors.modalities?.[index]?.visitType && (
-                                          <p className="text-sm text-red-500">
-                                            {errors.modalities[index]?.visitType?.message}
-                                          </p>
+                                          <p className="text-sm text-red-500">{errors.modalities[index]?.visitType?.message}</p>
                                         )}
                                       </div>
                                     </>
@@ -1211,9 +1122,7 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                         )}
                                       />
                                       {errors.modalities?.[index]?.service && (
-                                        <p className="text-sm text-red-500">
-                                          {errors.modalities[index]?.service?.message}
-                                        </p>
+                                        <p className="text-sm text-red-500">{errors.modalities[index]?.service?.message}</p>
                                       )}
                                     </div>
                                   ) : (
@@ -1227,7 +1136,10 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                         rules={{ required: "Service is required" }}
                                         render={({ field }) => (
                                           <SearchableSelect
-                                            options={getServiceOptions(modality.type).map((service) => ({ value: service.service, label: `${service.service} - ₹${service.amount}` }))}
+                                            options={getServiceOptions(modality.type).map((service) => ({
+                                              value: service.service,
+                                              label: `${service.service} - ₹${service.amount}`,
+                                            }))}
                                             value={field.value || ""}
                                             onValueChange={(value) => {
                                               const serviceOptions = getServiceOptions(modality.type)
@@ -1244,18 +1156,14 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                         )}
                                       />
                                       {errors.modalities?.[index]?.service && (
-                                        <p className="text-sm text-red-500">
-                                          {errors.modalities[index]?.service?.message}
-                                        </p>
+                                        <p className="text-sm text-red-500">{errors.modalities[index]?.service?.message}</p>
                                       )}
                                     </div>
                                   )}
-
                                   <div className="space-y-2">
                                     <Label className="text-xs">
                                       Charges (₹) <span className="text-red-500">*</span>
                                     </Label>
-                                    {/* Use the custom EditableChargesInput component */}
                                     <EditableChargesInput
                                       value={modality.charges}
                                       onSave={(newValue: number) => handleSaveCharges(index, newValue)}
@@ -1266,16 +1174,13 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                       error={errors.modalities?.[index]?.charges?.message}
                                     />
                                     {errors.modalities?.[index]?.charges && (
-                                      <p className="text-sm text-red-500">
-                                        {errors.modalities[index]?.charges?.message}
-                                      </p>
+                                      <p className="text-sm text-red-500">{errors.modalities[index]?.charges?.message}</p>
                                     )}
                                   </div>
                                 </div>
                               </CardContent>
                             </Card>
                           ))}
-
                           {fields.length > 0 && (
                             <div className="bg-blue-50 p-4 rounded-lg">
                               <div className="flex justify-between items-center">
@@ -1287,8 +1192,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                         </CardContent>
                       </Card>
                     )}
-
-                    {/* Payment Section - Only for hospital visits */}
                     {watchedAppointmentType === "visithospital" && (
                       <Card className="border-l-4 border-l-purple-500">
                         <CardHeader className="pb-4">
@@ -1299,7 +1202,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                         </CardHeader>
                         <CardContent className="space-y-4">
                           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            {/* Payment Method */}
                             <div className="space-y-2">
                               <Label htmlFor="paymentMethod" className="text-sm font-medium">
                                 Payment Method <span className="text-red-500">*</span>
@@ -1329,8 +1231,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                 <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>
                               )}
                             </div>
-
-                            {/* Total Charges Display */}
                             <div className="space-y-2">
                               <Label className="text-sm font-medium">Total Charges</Label>
                               <div className="relative">
@@ -1343,8 +1243,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                 />
                               </div>
                             </div>
-
-                            {/* Cash Amount */}
                             {watchedPaymentMethod === "cash" || watchedPaymentMethod === "mixed" ? (
                               <div className="space-y-2">
                                 <Label htmlFor="cashAmount" className="text-sm font-medium">
@@ -1369,17 +1267,13 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                     onWheel={(e) => e.currentTarget.blur()}
                                   />
                                 </div>
-                                {errors.cashAmount && (
-                                  <p className="text-sm text-red-500">{errors.cashAmount.message}</p>
-                                )}
+                                {errors.cashAmount && <p className="text-sm text-red-500">{errors.cashAmount.message}</p>}
                               </div>
                             ) : null}
-
-                            {/* Online Amount */}
-                            {watchedPaymentMethod === "online" ||
-                            watchedPaymentMethod === "card-credit" ||
-                            watchedPaymentMethod === "card-debit" ||
-                            watchedPaymentMethod === "mixed" ? (
+                            {(watchedPaymentMethod === "online" ||
+                              watchedPaymentMethod === "card-credit" ||
+                              watchedPaymentMethod === "card-debit" ||
+                              watchedPaymentMethod === "mixed") && (
                               <div className="space-y-2">
                                 <Label htmlFor="onlineAmount" className="text-sm font-medium">
                                   {watchedPaymentMethod === "online" ||
@@ -1412,15 +1306,11 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                     onWheel={(e) => e.currentTarget.blur()}
                                   />
                                 </div>
-                                {errors.onlineAmount && (
-                                  <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>
-                                )}
+                                {errors.onlineAmount && <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>}
                               </div>
-                            ) : null}
+                            )}
                           </div>
-
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {/* Cash Through */}
                             {(watchedPaymentMethod === "cash" || watchedPaymentMethod === "mixed") && (
                               <div className="space-y-2">
                                 <Label htmlFor="cashThrough" className="text-sm font-medium">
@@ -1446,8 +1336,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                 />
                               </div>
                             )}
-
-                            {/* Online Through */}
                             {(watchedPaymentMethod === "online" || watchedPaymentMethod === "mixed") && (
                               <div className="space-y-2">
                                 <Label htmlFor="onlineThrough" className="text-sm font-medium">
@@ -1473,8 +1361,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                 />
                               </div>
                             )}
-
-                            {/* Discount (read-only for display, calculated automatically) */}
                             <div className="space-y-2">
                               <Label htmlFor="discount" className="text-sm font-medium">
                                 Discount (Auto)
@@ -1486,15 +1372,14 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                   type="number"
                                   placeholder="Auto-calculated"
                                   className="pl-10 bg-gray-50 cursor-not-allowed"
-                                  value={watch("discount")}
+                                  // FIX: Correctly display discount, showing empty string if 0 for better UX
+                                  value={watchedDiscount === 0 ? "" : watchedDiscount}
                                   readOnly
                                   onWheel={(e) => e.currentTarget.blur()}
                                 />
                               </div>
                             </div>
                           </div>
-
-                          {/* Payment Summary */}
                           {totalModalityCharges > 0 && (
                             <Card className="bg-gradient-to-r from-green-50 to-blue-50 border-green-200">
                               <CardContent className="p-4">
@@ -1505,13 +1390,11 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                   </div>
                                   <div className="flex justify-between">
                                     <span>Discount:</span>
-                                    <span className="text-red-600">-₹{Number(watch("discount")) || 0}</span>
+                                    <span className="text-red-600">-₹{Number(watchedDiscount) || 0}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span>Amount to Pay:</span>
-                                    <span className="font-semibold">
-                                      ₹{totalModalityCharges - (Number(watch("discount")) || 0)}
-                                    </span>
+                                    <span className="font-semibold">₹{totalModalityCharges - (Number(watchedDiscount) || 0)}</span>
                                   </div>
                                   <div className="flex justify-between text-lg font-bold text-green-700">
                                     <span>Amount Paid:</span>
@@ -1524,14 +1407,12 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                         </CardContent>
                       </Card>
                     )}
-
-                    {/* Additional Notes Section */}
                     <Card className="border-l-4 border-l-orange-500">
                       <CardHeader className="pb-4">
-                          <CardTitle className="flex items-center gap-2 text-lg">
-                            <FileText className="h-5 w-5 text-orange-600" />
-                            Additional Notes
-                          </CardTitle>
+                        <CardTitle className="flex items-center gap-2 text-lg">
+                          <FileText className="h-5 w-5 text-orange-600" />
+                          Additional Notes
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
                         <div className="space-y-2">
@@ -1550,12 +1431,10 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                         </div>
                       </CardContent>
                     </Card>
-
-                    {/* Submit and View Bill Buttons */}
                     <div className="flex justify-end pt-6 border-t bg-gray-50 -mx-6 px-6 -mb-6 pb-6 gap-3">
                       {opdId && currentBillNo && watchedAppointmentType === "visithospital" && (
                         <Button
-                          type="button" // Important: not a submit button
+                          type="button"
                           onClick={handleViewBill}
                           variant="outline"
                           className="flex items-center gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 hover:text-blue-700 font-medium py-3 px-8 rounded-lg transition bg-transparent"
@@ -1585,8 +1464,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                   </form>
                 </FormProvider>
               </TabsContent>
-
-              {/* On-Call List Tab Content */}
               <TabsContent value="oncall" className="p-6 mt-0">
                 <Card>
                   <CardHeader>
@@ -1611,7 +1488,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                                     <p>
                                       <Calendar className="inline h-3 w-3 mr-1" />
                                       Age: {appointment.patient_detail?.age || "N/A"}{" "}
-                                      {/* FIX: Ensure age_unit is accessed safely */}
                                       {(appointment.patient_detail as PatientDetail).age_unit || ""}
                                     </p>
                                     <p>
@@ -1661,8 +1537,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                 </Card>
               </TabsContent>
             </Tabs>
-
-            {/* Search Existing Patient Section - Available on both edit and book tabs if needed */}
             <Card className="shadow-lg border-0 mt-6">
               <CardHeader className="bg-gray-100 border-b">
                 <CardTitle className="flex items-center gap-2 text-lg">
@@ -1702,7 +1576,6 @@ const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                     </Button>
                   </div>
                 </div>
-
                 {searchedPatientResults && searchedPatientResults.length > 0 && (
                   <div className="space-y-2">
                     <Label htmlFor="selectPatient">Select Patient</Label>

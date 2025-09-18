@@ -3,9 +3,10 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Edit2 } from "lucide-react";
 import PatientDetailsHeader from "./PatientDetailsHeader";
 import PdfGenerator from "./PdfGenerator";
+import SignatureCanvas from 'react-signature-canvas';
 
 // --- Type Definitions ---
 interface SurgicalConsentData {
@@ -101,18 +102,99 @@ const initialSurgicalConsentData: SurgicalConsentData = {
   anesthesiologistDate: "",
 };
 
+// --- Reusable Signature Modal Component ---
+interface SignatureModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (signatureDataUrl: string) => void;
+  title: string;
+}
+
+const SignatureModal: React.FC<SignatureModalProps> = ({ isOpen, onClose, onSave, title }) => {
+  const sigPad = useRef<SignatureCanvas | null>(null);
+
+  if (!isOpen) return null;
+
+  const handleSave = () => {
+    if (sigPad.current && !sigPad.current.isEmpty()) {
+      onSave(sigPad.current.toDataURL());
+    } else {
+      toast.error("Please provide a signature.");
+    }
+  };
+
+  const handleClear = () => {
+    if (sigPad.current) {
+      sigPad.current.clear();
+      toast.info("Signature cleared.");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+      <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-lg mx-4">
+        <h3 className="text-lg font-bold mb-4">{title}</h3>
+        <SignatureCanvas
+          ref={sigPad}
+          penColor='black'
+          canvasProps={{ width: 450, height: 200, className: 'sigCanvas border border-gray-400 rounded-md' }}
+        />
+        <div className="flex justify-end gap-2 mt-4">
+          <button
+            onClick={handleClear}
+            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
+          >
+            Clear
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors"
+          >
+            Save
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Main Component ---
 const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
   const [formData, setFormData] = useState<SurgicalConsentData>(initialSurgicalConsentData);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isVerifyingSignature, setIsVerifyingSignature] = useState({
-    signatureOfPatient: false,
-    signatureOfConsentGiver: false,
-    signatureOfWitness: false,
-    signatureOfAnesthesiologist: false,
+  const formRef = useRef<HTMLDivElement>(null);
+
+  const [modalState, setModalState] = useState({
+    isOpen: false,
+    field: '',
+    title: ''
   });
-  const formRef = useRef<HTMLDivElement>(null); // Create the ref
+
+  const handleOpenModal = (field: keyof SurgicalConsentData, title: string) => {
+    setModalState({ isOpen: true, field, title });
+  };
+
+  const handleCloseModal = () => {
+    setModalState({ isOpen: false, field: '', title: '' });
+  };
+
+  const handleSaveSignature = (signatureDataUrl: string) => {
+    setFormData((prev) => ({ ...prev, [modalState.field]: signatureDataUrl }));
+    toast.success(`${modalState.title} signature saved successfully!`);
+    handleCloseModal();
+  };
+
+  const handleClearSignature = (field: keyof SurgicalConsentData, name: string) => {
+    setFormData((prev) => ({ ...prev, [field]: '' }));
+    toast.info(`Signature for ${name} has been cleared.`);
+  };
 
   const fetchConsentData = useCallback(async () => {
     setIsLoading(true);
@@ -151,20 +233,11 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
         return;
       }
 
-      const dataToSave = { ...formData };
-
-      (Object.keys(dataToSave) as Array<keyof typeof dataToSave>).forEach(key => {
-        const value = dataToSave[key];
-        if (key.startsWith("signature") && typeof value === 'string' && value.length === 10 && !value.startsWith('http')) {
-          (dataToSave as any)[key] = '';
-        }
-      });
-
       const { error } = await supabase.from("ipd_record").upsert(
         {
           ipd_id: ipdId,
           user_id: session.user.id,
-          surgical_consent_data: dataToSave,
+          surgical_consent_data: formData,
         },
         { onConflict: "ipd_id,user_id" }
       );
@@ -183,77 +256,51 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
     setFormData((prev) => ({ ...prev, [field]: e.target.value }));
   };
 
-  const checkAndSetSignature = useCallback(async (password: string, field: keyof SurgicalConsentData) => {
-    if (password.length !== 10) return;
-    const signatureKey = field as keyof typeof isVerifyingSignature;
-    setIsVerifyingSignature(prev => ({ ...prev, [signatureKey]: true }));
-    try {
-      const { data, error } = await supabase
-        .from('signature')
-        .select('signature_url')
-        .eq('password', password)
-        .single();
-
-      if (error && error.code !== 'PGRST116') throw error;
-
-      if (data?.signature_url) {
-        setFormData(prev => ({ ...prev, [field]: data.signature_url }));
-        toast.success(`Signature verified for ${field.replace("signatureOf", "").replace(/([A-Z])/g, ' $1').trim()}.`);
-      } else {
-        toast.error(`Invalid signature PIN for ${field.replace("signatureOf", "").replace(/([A-Z])/g, ' $1').trim()}.`);
-      }
-    } catch (error) {
-      console.error("Error verifying signature:", error);
-      toast.error("Could not verify signature.");
-    } finally {
-      const signatureKey = field as keyof typeof isVerifyingSignature;
-      setIsVerifyingSignature(prev => ({ ...prev, [signatureKey]: false }));
-    }
-  }, []);
-
-  const handleSignatureReset = (field: keyof SurgicalConsentData) => {
-    if (window.confirm("Are you sure you want to remove this signature?")) {
-      setFormData(prev => ({ ...prev, [field]: '' }));
-      toast.info("Signature has been cleared.");
-    }
-  };
-
-  const renderSignatureInput = (field: keyof SurgicalConsentData) => {
-    const signatureKey = field as keyof typeof isVerifyingSignature;
-    const isVerifying = isVerifyingSignature[signatureKey];
+  const renderSignatureField = (field: keyof SurgicalConsentData, name: string) => {
+    const signatureUrl = formData[field];
+    const hasSignature = !!signatureUrl;
 
     return (
-      <div className="flex-grow p-1 border-b border-gray-300 focus:outline-none h-12 flex items-center justify-center">
-        {isVerifying ? (
-          <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
-        ) : typeof formData[field] === 'string' && formData[field]?.startsWith('http') ? (
-          <img
-            src={formData[field] as string}
-            alt="Signature"
-            title="Click to remove signature"
-            className="h-10 object-contain cursor-pointer hover:opacity-75"
-            onClick={() => handleSignatureReset(field)}
-          />
+      <div className="flex-grow flex items-center border border-gray-300 rounded-md p-1 min-h-[40px] relative">
+        {hasSignature ? (
+          <>
+            <img src={signatureUrl as string} alt={`${name} Signature`} className="h-full max-h-[40px] object-contain" />
+            <div className="absolute top-1 right-1 flex space-x-1 no-print">
+              <button
+                type="button"
+                onClick={() => handleOpenModal(field, name)}
+                className="bg-blue-500 text-white text-[10px] p-1 rounded-md opacity-75 hover:opacity-100 transition-opacity"
+                title="Edit Signature"
+              >
+                <Edit2 size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleClearSignature(field, name)}
+                className="bg-red-500 text-white text-[10px] p-1 rounded-md opacity-75 hover:opacity-100 transition-opacity"
+                title="Clear Signature"
+              >
+                <span className="sr-only">Clear</span>
+                &times;
+              </button>
+            </div>
+          </>
         ) : (
-          <input
-            type="password"
-            value={formData[field] as string}
-            onChange={(e) => {
-              setFormData(prev => ({ ...prev, [field]: e.target.value }));
-              if (e.target.value.length === 10) {
-                checkAndSetSignature(e.target.value, field);
-              }
-            }}
-            className="w-full text-center focus:outline-none bg-transparent"
-            maxLength={10}
-            placeholder="Enter a Password"
-            autoComplete="new-password"
-          />
+          <div className="flex justify-between items-center w-full px-2">
+            <span className="text-gray-500 italic text-sm">No signature</span>
+            <button
+              type="button"
+              onClick={() => handleOpenModal(field, name)}
+              className="px-3 py-1 bg-blue-500 text-white text-xs rounded-md hover:bg-blue-600 transition-colors flex items-center gap-1"
+            >
+              <Edit2 size={12} /> Sign
+            </button>
+          </div>
         )}
       </div>
     );
   };
-
+  
   const inputClass = "flex-grow p-1 border-b border-gray-300 focus:outline-none bg-transparent";
   const labelClass = "font-semibold mr-2 whitespace-nowrap";
 
@@ -272,7 +319,7 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
         <h2 className="font-bold text-lg">CONSENT FORM</h2>
       </div>
 
-      {/* Patient Details Section - Now using the new component */}
+      {/* Patient Details Section */}
       <PatientDetailsHeader ipdId={ipdId} />
 
       <div className="space-y-4">
@@ -308,9 +355,9 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
         <div className="mt-4">
           <h3 className="font-semibold text-sm flex items-center mb-2">
             Sign of the Patient
-            {renderSignatureInput("signatureOfPatient")}
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2">
+          {renderSignatureField("signatureOfPatient", "Patient")}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2 mt-4">
             <div className="flex items-center col-span-2">
               <label className={labelClass}>Name:</label>
               <input type="text" value={formData.patientNameSign} onChange={(e) => handleInputChange(e, "patientNameSign")} className={inputClass} />
@@ -336,9 +383,9 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
         <div className="mt-4">
           <h3 className="font-semibold text-sm flex items-center mb-2">
             Signature of consent giver:
-            {renderSignatureInput("signatureOfConsentGiver")}
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2">
+          {renderSignatureField("signatureOfConsentGiver", "Consent Giver")}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2 mt-4">
             <div className="flex items-center col-span-2">
               <label className={labelClass}>Name:</label>
               <input type="text" value={formData.consentGiverName} onChange={(e) => handleInputChange(e, "consentGiverName")} className={inputClass} />
@@ -367,9 +414,9 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
         <div className="mt-4">
           <h3 className="font-semibold text-sm flex items-center mb-2">
             Signature of Witness:
-            {renderSignatureInput("signatureOfWitness")}
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2">
+          {renderSignatureField("signatureOfWitness", "Witness")}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2 mt-4">
             <div className="flex items-center col-span-2">
               <label className={labelClass}>Name of the witness:</label>
               <input type="text" value={formData.witnessName} onChange={(e) => handleInputChange(e, "witnessName")} className={inputClass} />
@@ -390,9 +437,9 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
         <div className="mt-4">
           <h3 className="font-semibold text-sm flex items-center mb-2">
             Sign of Anesthesiologist:
-            {renderSignatureInput("signatureOfAnesthesiologist")}
           </h3>
-          <div className="space-y-2">
+          {renderSignatureField("signatureOfAnesthesiologist", "Anesthesiologist")}
+          <div className="space-y-2 mt-4">
             <div className="flex items-center">
               <label className={labelClass}>Full Name:</label>
               <input type="text" value={formData.anesthesiologistName} onChange={(e) => handleInputChange(e, "anesthesiologistName")} className={inputClass} />
@@ -425,6 +472,13 @@ const SurgicalConsentForm = ({ ipdId }: { ipdId: string }) => {
           )}
         </button>
       </div>
+
+      <SignatureModal
+        isOpen={modalState.isOpen}
+        onClose={handleCloseModal}
+        onSave={handleSaveSignature}
+        title={`Sign for ${modalState.title}`}
+      />
     </div>
   );
 };
